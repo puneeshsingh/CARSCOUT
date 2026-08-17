@@ -6,7 +6,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "chromadb>=1.5.9",
+    "deepagents>=0.7.6",
+    "langchain-mcp-adapters>=0.3.2",
+    "langchain-openai>=1.5.1",
     "langchain-text-splitters>=1.1.2",
+    "langgraph-cli[inmem]>=0.4.31",
     "openai>=3.1.0",
     "pandas>=3.0.5",
     "pydantic>=2.13.4",

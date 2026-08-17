@@ -1,0 +1,7 @@
+{
+  "graphs": {
+    "complaint_lookup_agent": "./complaint_lookup_agent.py:agent"
+  },
+  "env": "../.env",
+  "source": {"kind": "uv", "root": ".."}
+}
