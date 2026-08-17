@@ -1,0 +1,38 @@
+# Streamlit secrets (if you ever add a secrets.toml alongside .env)
+.streamlit/secrets.toml
+
+# OS/editor cruft
+.DS_Store
+.vscode/
+.idea/
+
+# Logs (if debug_retrieve.py or ingest.py write log files)
+*.log
+
+# Jupyter, if you end up prototyping in notebooks
+.ipynb_checkpoints/
+
+# Test/coverage artifacts, if you add tests later
+.pytest_cache/
+.coverage
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables
+.env
+
+# Dataset (junction to external folder, never track raw data)
+data/
+
+# Local Chroma vector store
+chroma_db/
+
