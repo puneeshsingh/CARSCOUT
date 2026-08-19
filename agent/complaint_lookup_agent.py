@@ -41,7 +41,11 @@ INPUT_PRICE_PER_1M_TOKENS = 0.15
 OUTPUT_PRICE_PER_1M_TOKENS = 0.60
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CARSCOUT_SERVER_PYTHON = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+# sys.executable is the interpreter already running this process, so the MCP
+# server subprocess inherits the same venv/deps on any OS (Windows uses
+# .venv/Scripts/python.exe, Linux uses .venv/bin/python - hardcoding either
+# breaks the other).
+CARSCOUT_SERVER_PYTHON = sys.executable
 CARSCOUT_SERVER_SCRIPT = PROJECT_ROOT / "mcp_server" / "server.py"
 
 client = MultiServerMCPClient(

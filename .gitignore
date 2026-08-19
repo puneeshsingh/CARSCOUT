@@ -33,6 +33,3 @@ wheels/
 # Dataset (junction to external folder, never track raw data)
 data/
 
-# Local Chroma vector store
-chroma_db/
-
