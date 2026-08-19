@@ -13,6 +13,7 @@ about vehicle reliability.
 import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -54,6 +55,12 @@ client = MultiServerMCPClient(
             "command": str(CARSCOUT_SERVER_PYTHON),
             "args": [str(CARSCOUT_SERVER_SCRIPT)],
             "transport": "stdio",
+            # MCP stdio transport only inherits a safe env allowlist (PATH,
+            # HOME, etc.) by default, not OPENAI_API_KEY - the subprocess
+            # needs it explicitly, especially where there's no .env file for
+            # it to load on its own (e.g. Render, where the key comes from a
+            # dashboard-set env var on the parent process only).
+            "env": dict(os.environ),
         },
     }
 )
