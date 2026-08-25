@@ -39,4 +39,16 @@ Safety ratings are looked up live against NHTSA's public API at query time - no 
 - `mcp_server/server.py` — exposes all four checks as MCP tools.
 - `agent/complaint_lookup_agent.py` — the deep agent and its due-diligence system prompt.
 - `agent/streamlit_app.py` — demo UI (Streamlit).
+- `agent/pages/1_Evaluations.py` — eval suite UI (Streamlit multipage nav).
+- `evals/` — Week 4 eval suite: `cases.py` (test cases), `checks.py` (code-based assertions), `run_evals.py` (runner), `results/*.json` (saved runs), `taxonomy.md` (failure taxonomy).
 - `chroma_db/` — local persistent Chroma store. Not tracked in git.
+
+## Week 4: evals
+
+```
+uv run python evals/run_evals.py
+```
+
+Runs 23 cases (happy-path, edge-case, adversarial/prompt-injection, and guardrail-only) through the agent and its guardrails, checks 6 code-based assertions per applicable case (tool-call completeness, no raw score leakage, recall framing safety, injection non-compliance, benign-input false-positive rate, guardrail correctness), and saves a timestamped result to `evals/results/`. Compare any two runs in the Streamlit "Evaluations" page.
+
+**Top failure found and fixed**: the agent used to silently discard its price/recall/safety findings whenever the complaint search came back inconclusive, because the code that generates deterministic reliability wording keyed off *whichever* tool's result streamed last rather than specifically `search_complaints`. Fixed by tracking tool-call order. See `evals/taxonomy.md` for the full write-up and all failure categories observed; `recall_framing` check went from 17/18 (94.4%) to 18/18 (100%) after the fix.

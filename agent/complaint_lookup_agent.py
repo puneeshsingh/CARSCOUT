@@ -271,8 +271,10 @@ def _format_no_confident_match_answer(
     year: int,
     queries_tried: list[str],
     tool_result: dict,
+    include_closing_note: bool = True,
 ) -> str:
-    """Deterministically build the final answer for a no_confident_match result.
+    """Deterministically build the reliability portion of the answer for a
+    no_confident_match result.
 
     Built directly from the tool's raw fields rather than left to free-form
     LLM phrasing, because the required distinction (zero complaints for this
@@ -280,6 +282,10 @@ def _format_no_confident_match_answer(
     to blur or drop on a given run, and a demo needs this to be reproducible
     every time. Deliberately never surfaces min_score/best_score_found as raw
     numbers - only whether a match exists at all.
+
+    `include_closing_note` is False when this is being prepended to the
+    LLM's own full due-diligence answer (which already ends with its own
+    Carfax/PPI closing note) - True only when this is the entire answer.
     """
     seen: list[str] = []
     for q in queries_tried:
@@ -314,6 +320,9 @@ def _format_no_confident_match_answer(
             "Verdict: not a clearly known issue in this dataset - "
             "not a guarantee the vehicle is problem-free."
         )
+
+    if not include_closing_note:
+        return f"{header}\n\n{body}\n\n{verdict}"
 
     closing_note = (
         "This doesn't guarantee a clean vehicle - NHTSA complaints don't cover accidents, title "
@@ -359,7 +368,11 @@ async def _stream_events(
     total_output_tokens = 0
     final_answer = None
     queries_tried: list[str] = []
-    last_tool_result: dict | None = None
+    # FIFO of tool names in call order, so each ToolMessage observation can be
+    # matched back to the tool that produced it - ToolNode executes and
+    # returns ToolMessages in the same order the model requested them.
+    tool_call_queue: list[str] = []
+    search_complaints_result: dict | None = None
 
     try:
         async for step in agent.astream(
@@ -376,6 +389,7 @@ async def _stream_events(
                         if msg.tool_calls:
                             for call in msg.tool_calls:
                                 yield ("act", {"tool": call["name"], "args": call["args"]})
+                                tool_call_queue.append(call["name"])
                                 if call["name"] == "search_complaints":
                                     query = call["args"].get("query")
                                     if query:
@@ -412,8 +426,9 @@ async def _stream_events(
                             parsed = json.loads(content)
                         except (json.JSONDecodeError, TypeError):
                             parsed = None
-                        if isinstance(parsed, dict) and "status" in parsed:
-                            last_tool_result = parsed
+                        called_tool = tool_call_queue.pop(0) if tool_call_queue else None
+                        if called_tool == "search_complaints" and isinstance(parsed, dict) and "status" in parsed:
+                            search_complaints_result = parsed
     except GraphRecursionError:
         yield ("capped", {"max_steps": MAX_STEPS})
         final_answer = (
@@ -421,9 +436,23 @@ async def _stream_events(
             "Failing closed rather than guessing - try a narrower symptom description."
         )
 
-    is_no_confident_match = bool(last_tool_result) and last_tool_result.get("status") == "no_confident_match"
+    is_no_confident_match = (
+        bool(search_complaints_result) and search_complaints_result.get("status") == "no_confident_match"
+    )
     if is_no_confident_match:
-        final_answer = _format_no_confident_match_answer(make, vehicle_model, year, queries_tried, last_tool_result)
+        # Deterministic reliability wording only - the LLM's own synthesis of
+        # the other three signals (price/recalls/safety) is preserved rather
+        # than discarded, so an inconclusive complaint search doesn't wipe out
+        # the rest of the due-diligence report.
+        reliability_note = _format_no_confident_match_answer(
+            make, vehicle_model, year, queries_tried, search_complaints_result,
+            include_closing_note=not bool(final_answer),
+        )
+        final_answer = (
+            f"{reliability_note}\n\n---\n\n{final_answer}"
+            if final_answer
+            else reliability_note
+        )
 
     yield (
         "done",
