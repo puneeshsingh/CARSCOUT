@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "chromadb>=1.5.9",
     "deepagents>=0.7.6",
+    "httpx>=0.28.1",
     "langchain-mcp-adapters>=0.3.2",
     "langchain-openai>=1.5.1",
     "langchain-text-splitters>=1.1.2",

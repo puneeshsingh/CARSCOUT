@@ -3,7 +3,7 @@ import pandas as pd
 from chromadb.utils import embedding_functions
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from config import CHROMA_DB_DIR, EMBEDDING_MODEL, NHTSA_COMPLAINTS_DIR, OPENAI_API_KEY
+from config import CHROMA_DB_DIR, EMBEDDING_MODEL, NHTSA_COMPLAINTS_DIR, OPENAI_API_KEY, VEHICLE_SHORTLIST
 
 COMPLAINTS_CSV = NHTSA_COMPLAINTS_DIR / "complaints.csv"
 COLLECTION_NAME = "nhtsa_complaints"
@@ -22,15 +22,7 @@ NHTSA_COLUMNS = [
     "numberOfDeaths",
 ]
 
-# (make, model, year, year_tolerance); year=None matches any model year.
-SHORTLIST = [
-    ("hyundai", "kona", 2020, 1),
-    ("mazda", "mazda3", 2017, 1),
-    ("kia", "forte", 2021, 1),
-    ("hyundai", "elantra", 2021, 1),
-    ("honda", "civic", 2015, 1),
-    ("toyota", "corolla", None, None),
-]
+SHORTLIST = VEHICLE_SHORTLIST
 
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 125

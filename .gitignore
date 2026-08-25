@@ -33,3 +33,6 @@ wheels/
 # Dataset (junction to external folder, never track raw data)
 data/
 
+# Filtered/cached data derived from the datasets above
+data_cache/
+

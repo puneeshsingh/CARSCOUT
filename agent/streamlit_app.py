@@ -1,7 +1,8 @@
 """
 Minimal demo UI for complaint_lookup_agent.py - runs the deep agent
-(GPT-4o-mini + carscout_retrieval MCP tool) against real NHTSA complaint
-data and renders the Think -> Act -> Observe trace plus token cost.
+(GPT-4o-mini + carscout_retrieval MCP tools: reliability complaints, price
+comps, recalls, safety rating) against real NHTSA and Craigslist data and
+renders the Think -> Act -> Observe trace plus token cost.
 
 For the bootcamp cohort demo. Not polished, not for production use.
 """
@@ -14,12 +15,13 @@ load_dotenv()
 import complaint_lookup_agent as cla  # noqa: E402  (must load .env first, sets up logging)
 import guards  # noqa: E402
 
-st.set_page_config(page_title="CarScout Complaint Lookup Agent", layout="wide")
-st.title("CarScout Complaint Lookup Agent")
+st.set_page_config(page_title="CarScout Due-Diligence Agent", layout="wide")
+st.title("CarScout Due-Diligence Agent")
 st.caption(
-    "Runs a deepagents agent (GPT-4o-mini + carscout_retrieval MCP tool) against real NHTSA "
-    "complaint data. The agent is instructed to answer only from tool results, never from its "
-    "own training knowledge."
+    "Runs a deepagents agent (GPT-4o-mini + 4 carscout_retrieval MCP tools) against real NHTSA "
+    "and Craigslist data to check reliability complaints, price fairness, recall history, and "
+    "crash-safety rating. The agent is instructed to answer only from tool results, never from "
+    "its own training knowledge."
 )
 
 # (make, model, default_year) - the same shortlist the retrieval dataset was
@@ -37,6 +39,8 @@ VEHICLE_SHORTLIST = [
 ]
 VEHICLE_LABELS = [f"{make} {model} ({year})" for make, model, year in VEHICLE_SHORTLIST]
 
+CONDITION_OPTIONS = ["Not sure / skip", "new", "like new", "excellent", "good", "fair", "salvage"]
+
 col1, col2 = st.columns([2, 1])
 with col1:
     selected_label = st.selectbox("Vehicle", VEHICLE_LABELS)
@@ -45,6 +49,15 @@ with col2:
     year = st.number_input("Year", min_value=1990, max_value=2030, value=selected_year, step=1)
 
 make, vehicle_model = selected_make, selected_model
+
+col3, col4, col5 = st.columns(3)
+with col3:
+    asking_price = st.number_input("Asking price ($)", min_value=0, value=15000, step=500)
+with col4:
+    odometer = st.number_input("Odometer (miles)", min_value=0, value=45000, step=1000)
+with col5:
+    condition_choice = st.selectbox("Condition", CONDITION_OPTIONS)
+condition = None if condition_choice == "Not sure / skip" else condition_choice
 
 symptom = st.text_input(
     "Symptom / question",
@@ -63,6 +76,10 @@ if st.button("Run agent", type="primary"):
         errors.append("Please enter both make and model before running the agent.")
     if year is None:
         errors.append("Please enter a valid year before running the agent.")
+    if not asking_price or asking_price <= 0:
+        errors.append("Please enter the listing's asking price before running the agent.")
+    if not odometer or odometer <= 0:
+        errors.append("Please enter the listing's odometer reading before running the agent.")
     if not symptom_clean:
         errors.append("Please describe a symptom or ask a question before running the agent.")
 
@@ -98,7 +115,10 @@ if st.button("Run agent", type="primary"):
 
     # Gate 3: the agent itself - only reached if both gates above passed.
     with st.spinner("Agent is running (Think -> Act -> Observe)..."):
-        trace = cla.run_with_trace(make_clean, model_clean, int(year), symptom_clean)
+        trace = cla.run_with_trace(
+            make_clean, model_clean, int(year), symptom_clean,
+            asking_price=float(asking_price), odometer=int(odometer), condition=condition,
+        )
 
     if trace["hit_step_cap"]:
         st.warning(f"Agent hit the {cla.MAX_STEPS}-step cap without a confident final answer (failed closed).")
