@@ -1,53 +1,56 @@
 # CarScout failure taxonomy (Week 4)
 
-Derived from a 23-case eval suite (`evals/cases.py`) run against the 4-tool due-diligence agent: 8 happy-path, 2 edge-case, 3 adversarial, 5 repeats of one known-flaky benign query, and 5 guardrail-only cases. Baseline run: `evals/results/2026-08-25T04-58-09.121713+00-00.json`. Taxonomy built from a blind open-coding pass over the 18 real agent traces (`evals/open_coding_notes.md`) written *before* cross-checking against the automated checks - see that file for the raw per-case notes. Fully-fixed run: `evals/results/2026-08-26T01-13-43.274685+00-00.json`.
+**What this document is:** we ran 23 test questions through the agent (different cars, different symptoms, some tricky/adversarial ones, and some straightforward ones), read through the answers by hand, and grouped what went wrong into categories. Two of those turned out to be real bugs, which we then fixed and re-tested to confirm the fix worked.
 
-## Frequency x impact ranking
+**How we found these:** rather than guessing what might break and only testing for that, we first read all 18 real answers with fresh eyes and took notes on anything that looked off - *before* looking at what our automated checks said. That order matters: it's how we caught a bug none of our checks were even looking for (#1 below). The raw notes are in `evals/open_coding_notes.md` if you want to see the reasoning as it happened.
 
-| # | Category | Observed frequency | Impact (1-5) | Priority reasoning |
+## The 7 things we checked for, ranked by how much they matter
+
+| # | What we checked | How often it happened | How bad is it (1-5) | Why it's ranked here |
 |---|---|---|---|---|
-| 1 | **Recall count/duplication bug** | 12/17 applicable cases (71%) | 3 - misleading but not dangerous | Highest observed frequency by far. Inflates the stated recall count and sometimes shows the same campaign twice, undermining trust in the numbers even though the underlying recall content shown is accurate. |
-| 2 | **Signal-discarding on inconclusive complaint search** | 1/18 (6%) in this sample | 5 - drops 3 of 4 signals entirely | Low sample frequency, but not a rare edge case in the wild - it fires on *any* inconclusive complaint search, a routine outcome, and silently discards the whole rest of the report every time it does. Severity outweighs the small sample count. |
-| 3 | **Prompt-injection false positive on benign phrasing** | 0/5 post-fix; was intermittent (non-deterministic, roughly every other run) before the fix, found ad hoc earlier in the session | 3 - erodes trust, no factual harm | Confirmed fixed via 5 clean reruns of the same query in both the baseline and final run. |
-| 4 | Tool-call incompleteness | 0/18 observed | 4 - an incomplete report is a real gap | No occurrences in this sample; `MAX_STEPS=20` seems to give enough headroom. Worth continued monitoring, not a small suite size to rule it out permanently. |
-| 5 | Prompt-injection compliance | 0/3 observed | 5 - would mean the agent lies about known issues | Highest potential impact category, zero observed compliance in 3 adversarial cases. Small sample (3) - keep testing new phrasings as the suite grows. |
-| 6 | Guardrail correctness | 0/5 observed | 3 - a false block/pass affects UX, not data integrity | All 5 guardrail-only cases classified correctly. |
-| 7 | Raw score/percentile leakage | 0/18 observed | 2 - soft UX rule, not safety-relevant | Never observed; lowest-priority category. |
+| 1 | **Recall counts were inflated/duplicated** | 12 out of 17 checks (71%) | 3 - confusing, not dangerous | By far the most common problem we found. Doesn't hide real safety info, but makes the numbers untrustworthy. |
+| 2 | **A weak complaint search wiped out the whole report** | 1 out of 18 checks (6%) in this batch | 5 - the worst kind of failure | Rare in this small sample, but not actually rare in real use - it happens *every time* the complaint search comes back inconclusive, which is a normal, everyday outcome. Small sample size undersells how often this would really bite. |
+| 3 | **A normal question got mistaken for an attack** | 0 out of 5 after the fix (was roughly 1 in 2 before, found earlier in the session) | 3 - annoying, not dangerous | Confirmed fixed - ran the same question 5 times after the fix and it never happened again. |
+| 4 | The agent skipped one of its 4 required checks | 0 out of 18 | 4 - a real gap if it happened | Never happened in this batch, but worth watching as we add more test cases. |
+| 5 | The agent complied with a hidden/injected instruction | 0 out of 3 | 5 - would mean the agent lies to the user | Never happened, but only tested with 3 attack phrasings so far - small sample. |
+| 6 | The spam/relevance filter blocked or let through the wrong thing | 0 out of 5 | 3 - annoying, not dangerous | All 5 filter tests behaved correctly. |
+| 7 | A raw internal number (like a match score) leaked into the answer | 0 out of 18 | 2 - minor polish issue | Never happened. Lowest priority of the seven. |
 
-## #1: Recall count/duplication bug (fixed)
+## #1: Recall counts were inflated/duplicated (found and fixed)
 
-**What happened:** the recall section routinely overstated how many distinct recall campaigns exist, and sometimes displayed the exact same campaign twice. Example from the open-coding pass: a 2020 Hyundai Kona query returned "four recall campaigns" while only two were ever shown; the raw tool data actually contained campaign `21V301000` three times over. A 2021 Kia Forte and a 2016 Toyota Corolla each showed one campaign duplicated, with the model itself sometimes noting "this is a repeat of the previous campaign" while still presenting it as a separate numbered item.
+**What happened:** the app would sometimes say something like "there are four recall campaigns for this car" but then only actually describe two of them - or, in a couple of cases, list the exact same recall twice. A real example: asking about a 2020 Hyundai Kona, the app said "four recall campaigns" when there were really only two distinct ones. One of them had just been counted three times.
 
-**Root cause:** NHTSA's `recalls.csv` has one row per model-year a campaign covers (e.g. a 2019-2021 recall gets 3 rows, one per year). `src/recall_check.py`'s query matches on a +/-1 year tolerance window, so a campaign spanning 3 consecutive years gets pulled in up to 3 times for a single query - counted and returned as if they were 3 separate recalls.
+**Why it happened:** the government's recall database (NHTSA) lists a recall separately for every model year it covers - so a recall that affects 2019, 2020, and 2021 cars shows up as three separate rows, even though it's really one recall. Our tool was counting those three rows as three different recalls instead of recognizing they were the same one.
 
-**Caught by:** blind open-coding of the 18 baseline traces (`evals/open_coding_notes.md`), *not* by any of the original 6 automated checks - none of them looked at whether `check_recalls`' own result list contained duplicate campaign numbers. This is exactly why the open-coding step matters: check-design bias means checks built from priors don't catch failure modes nobody thought to check for.
+**How we fixed it:** the recall-lookup code now recognizes when the same recall shows up more than once and only counts and shows it once.
 
-**Fix:** `src/recall_check.py` now deduplicates matches by `NHTSACampaignNumber` before counting or truncating to the top 5. Verified with a real query: 2020 Kona went from `[20V022000, 21V301000, 21V301000, 21V301000]` (4, one real) to `[20V022000, 21V301000]` (2, correct).
+**Did it work?** Yes - we checked a Kona, a Kia Forte, and a Toyota Corolla (all of which had this problem before) and each one now shows the correct, non-repeated list. We also added a permanent automated check for this so it can't quietly come back - it now passes 18 out of 18 times.
 
-**New check:** `check_no_duplicate_recalls` in `evals/checks.py`, added to the permanent suite. Post-fix: 18/18 (100%) - no historical automated score exists for comparison since the check didn't exist before the fix, but the qualitative evidence above (12/17 cases affected) stands as the "before" state.
+*(For engineers: the fix is in `src/recall_check.py`, the new check is `check_no_duplicate_recalls` in `evals/checks.py`. This bug wasn't caught by any of our first 6 automated checks - only by reading the real answers by hand.)*
 
-## #2: Signal-discarding on inconclusive complaint search (fixed)
+## #2: A weak complaint search wiped out the whole report (found and fixed)
 
-**What happened:** when `search_complaints` returned `status="no_confident_match"`, the agent replaced its *entire* due-diligence report with a complaints-only deterministic message - silently discarding price, recall, and safety-rating findings it had already gathered and correctly synthesized.
+**What happened:** the app is supposed to check four things every time - reliability complaints, price fairness, recall history, and safety rating - and combine them into one report. But if the complaint search came back without a clear match, the app would throw away the *entire* report and just show a short "no clear match" message instead - silently deleting a real price warning, recall, or safety rating it had already found.
 
-**Root cause:** the trigger variable (`last_tool_result` in `agent/complaint_lookup_agent.py`) was overwritten by *whichever* of the 4 tools' observations happened to stream last, not specifically `search_complaints` - a leftover from when the agent had only one tool. Even when it did fire correctly, the code fully *replaced* `final_answer` instead of merging.
+**Why it happened:** a piece of leftover logic from an earlier, simpler version of the app (back when it only checked complaints) was deciding "should I show the short fallback message instead?" based on whichever of the four checks happened to finish last - not specifically the complaint check. So a good price or recall result could get wiped out just because of unlucky timing.
 
-**Caught by:** the `recall_framing` check - case `happy_corolla_infotainment` failed it in the baseline: `check_recalls` found a real recall for the 2016 Corolla, but the answer was the bare complaints-only fallback with no mention of it.
+**How we fixed it:** the app now correctly waits for the complaint check specifically, and instead of replacing the whole report, it adds a short note about the complaint search on top of the full report - so nothing gets lost.
 
-**Fix:** track tool-call order so the trigger keys specifically on the `search_complaints` observation, and append the deterministic reliability wording to the LLM's own answer instead of replacing it.
+**Did it work?** Yes - our automated test for this went from passing 17 out of 18 times (94%) to 18 out of 18 (100%) after the fix.
 
-**Before/after (`recall_framing` check):** 17/18 (94.4%) -> 18/18 (100%).
+*(For engineers: the fix is in `agent/complaint_lookup_agent.py`, caught by the `recall_framing` check.)*
 
-## Other categories observed (no new issues)
+## The other 5 categories: nothing wrong found
 
-3. **Prompt-injection false positive on benign phrasing** - fixed earlier in the session by adding explicit negative examples to the system prompt. `benign_no_false_positive` check: 5/5 clean in both the baseline and final runs.
-4. **Tool-call incompleteness** (`tool_completeness`) - 18/18, 0 failures.
-5. **Prompt-injection compliance** (`injection_noncompliance`) - 3/3, 0 failures.
-6. **Guardrail correctness** (`guardrail_correctness`, `agent/guards.py`) - 5/5, 0 failures.
-7. **Raw score/percentile leakage** (`no_score_leakage`) - 18/18, 0 failures.
+- **Normal questions mistaken for attacks** - already fixed earlier in the session; confirmed clean across 5 repeat tests both before and after.
+- **Skipping one of the 4 required checks** - never happened, 18 for 18.
+- **Complying with a hidden/injected instruction** - never happened, 3 for 3.
+- **Spam/relevance filter mistakes** - never happened, 5 for 5.
+- **Raw internal numbers leaking into an answer** - never happened, 18 for 18.
 
-## Note on check quality
+## A note on how the checks themselves improved
 
-Two rounds of eval-check iteration happened during this investigation, not just fixes to the agent:
-1. `recall_framing`'s hedge-cue keyword list (`vin`, `confirm`) was initially too narrow and false-failed a case where the agent hedged correctly with different wording ("verify whether these recalls have been addressed"). Broadened the keyword list.
-2. The open-coding pass found a real, high-frequency bug (#1 above) that none of the 6 original checks were designed to catch, because they were all written from priors about where the agent would fail rather than from a blind read of real output first. A new check (`check_no_duplicate_recalls`) was added specifically because of what open-coding surfaced - the intended order of operations for this methodology, and the reason it's worth doing even after checks already exist.
+Two things worth knowing about the checking process itself, not just the app:
+
+1. One of our checks was initially too strict - it expected the words "VIN" or "confirm" specifically when the app hedges about a recall's repair status, but the app sometimes uses different, equally valid wording like "verify whether this has been addressed." We loosened the check's wording list rather than treat it as a second app bug.
+2. The recall-duplication bug (#1) is a good example of why reading real answers matters, not just running automated checks - none of our first 6 checks were even looking for duplicate recalls, because we designed them based on guesses about what might go wrong. Reading the real output first is what actually found it.
