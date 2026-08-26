@@ -55,7 +55,13 @@ def _run_case(case: dict) -> dict:
     if "benign_repeat" in tags:
         check_results.append(check_benign_no_false_positive(case, trace))
 
-    return {"id": case["id"], "tags": tags, "checks": check_results, "final_answer": trace["final_answer"]}
+    return {
+        "id": case["id"],
+        "tags": tags,
+        "checks": check_results,
+        "final_answer": trace["final_answer"],
+        "steps": trace["steps"],  # kept so future checks can be scored retroactively without re-running the agent
+    }
 
 
 def run_suite() -> dict:

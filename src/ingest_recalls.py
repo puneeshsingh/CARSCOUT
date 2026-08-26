@@ -33,6 +33,18 @@ def load_and_filter_recalls(csv_path=NHTSA_RECALLS_CSV) -> pd.DataFrame:
 
     filtered = df[mask].copy()
 
+    # NHTSA's recalls.csv has one row per affected component/description within
+    # a campaign, so the same (campaign, make, model, year) can appear several
+    # times - collapse those to one row each so a campaign is counted/reported
+    # once. Deliberately keyed on all four fields, not just campaign number,
+    # since the same real campaign can legitimately cover multiple distinct
+    # vehicles in the shortlist (e.g. a shared-engine recall).
+    before = len(filtered)
+    filtered = filtered.drop_duplicates(subset=["NHTSACampaignNumber", "Make", "Model", "ModelYear"])
+    deduped_count = before - len(filtered)
+    if deduped_count:
+        print(f"Dropped {deduped_count} duplicate campaign row(s) (same campaign/make/model/year).")
+
     counts = filtered.groupby(["Make", "Model"]).size().sort_values(ascending=False)
     print("Recall campaign counts per make/model:")
     print(counts.to_string())

@@ -24,7 +24,12 @@ def check_recalls(make: str, model: str, year: int) -> RecallCheckResponse:
         & (df["Model"] == model.strip().lower())
         & df["ModelYear"].between(year - YEAR_TOLERANCE, year + YEAR_TOLERANCE)
     )
-    matches = df[mask].head(MAX_RECALLS_RETURNED)
+    # A single campaign often spans several consecutive model years (one row
+    # per year in the source data), so the +/-1 year tolerance window above
+    # can pull in the same campaign multiple times for one query. Collapse to
+    # one row per campaign before counting/truncating, so the reported count
+    # and the list the user sees both reflect distinct campaigns.
+    matches = df[mask].drop_duplicates(subset=["NHTSACampaignNumber"]).head(MAX_RECALLS_RETURNED)
 
     if matches.empty:
         return RecallCheckResponse(
