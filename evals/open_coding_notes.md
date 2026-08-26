@@ -1,6 +1,6 @@
 # Open-coding notes: baseline run (2026-08-25T04-58-09)
 
-Free-text read of the 18 real agent traces (excludes the 5 guardrail-only cases, which don't produce agent traces), written before cross-checking against the existing taxonomy or checks - looking for anything notable, not just confirming what's already known.
+Free-text read of the 18 real agent traces (excludes the 5 guardrail-only cases, which don't produce agent traces), written before cross-checking against the existing taxonomy or checks - looking for anything notable, not just confirming what's already known. These raw, line-by-line notes are grouped into categories in `evals/axial_coding_notes.md`, which in turn feed `evals/taxonomy.md`.
 
 - **happy_kona_stalling**: Recall History says "There are four recall campaigns" but only lists 2 (numbered 1, 2). Count doesn't match the enumeration. Otherwise well-cited, correct price/safety phrasing.
 - **happy_mazda3_transmission**: Same pattern - "five recall campaigns" stated, 3 listed.

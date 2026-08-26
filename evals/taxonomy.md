@@ -2,7 +2,7 @@
 
 **What this document is:** we ran 23 test questions through the agent (different cars, different symptoms, some tricky/adversarial ones, and some straightforward ones), read through the answers by hand, and grouped what went wrong into categories. Two of those turned out to be real bugs, which we then fixed and re-tested to confirm the fix worked.
 
-**How we found these:** rather than guessing what might break and only testing for that, we first read all 18 real answers with fresh eyes and took notes on anything that looked off - *before* looking at what our automated checks said. That order matters: it's how we caught a bug none of our checks were even looking for (#1 below). The raw notes are in `evals/open_coding_notes.md` if you want to see the reasoning as it happened.
+**How we found these:** rather than guessing what might break and only testing for that, we first read all 18 real answers with fresh eyes and took notes on anything that looked off - *before* looking at what our automated checks said. That order matters: it's how we caught a bug none of our checks were even looking for (#1 below). The raw notes are in `evals/open_coding_notes.md`; how those raw notes got grouped into the categories below is in `evals/axial_coding_notes.md`.
 
 ## The 7 things we checked for, ranked by how much they matter
 
