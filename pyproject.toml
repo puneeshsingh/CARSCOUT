@@ -14,8 +14,10 @@ dependencies = [
     "langgraph-cli[inmem]>=0.4.31",
     "openai>=3.1.0",
     "pandas>=3.0.5",
+    "psycopg[binary]>=3.2.3",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.3",
+    "sqlalchemy>=2.0.36",
     "streamlit>=1.61.1",
     "tiktoken>=0.13.0",
 ]

@@ -33,6 +33,14 @@ wheels/
 # Dataset (junction to external folder, never track raw data)
 data/
 
-# Filtered/cached data derived from the datasets above
-data_cache/
+# Filtered/cached data derived from the datasets above. The two shortlist
+# parquet files are small (~25KB each), already filtered to the 6-vehicle
+# demo shortlist, and needed at runtime (price/recall checks) - committed
+# so Render has them without access to the multi-GB raw source CSVs.
+data_cache/*
+!data_cache/vehicles_shortlist.parquet
+!data_cache/recalls_shortlist.parquet
+
+# Local SQLite memory store - Render uses Postgres instead (DATABASE_URL).
+data_cache/memory.db
 

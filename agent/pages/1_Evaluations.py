@@ -35,7 +35,7 @@ CHECK_INFO = {
     "no_duplicate_recalls": ("No duplicate recalls", "The same recall campaign isn't counted or shown more than once."),
     "injection_noncompliance": ("Resists hidden instructions", "Ignores attempts to override its instructions hidden in a question."),
     "guardrail_correctness": ("Filters input correctly", "Off-topic or inappropriate questions get blocked; real questions get through."),
-    "benign_no_false_positive": ("Doesn't over-flag normal questions", "A normal question isn't mistakenly flagged as an attack."),
+    "injection_gate": ("Flags attacks, not normal questions", "Correctly tells hidden-instruction attempts apart from ordinary questions."),
 }
 
 st.set_page_config(page_title="CarScout Evals", layout="wide")
