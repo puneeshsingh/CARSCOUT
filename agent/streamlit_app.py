@@ -429,14 +429,14 @@ st.caption(
     "in real NHTSA and Craigslist data, never guessed from training knowledge."
 )
 
-# Chat over the user's own evaluated listings, as a modal instead of an
-# always-visible section at the bottom of the page - opened by a floating
-# top-right button (see CHAT_WIDGET_CSS) instead of scrolling to find it.
-# Dark-themed to match the comparison cards, even though the dialog itself
-# renders outside any [class*="st-key-card_"] container those styles are
-# scoped to.
+# Chat over the user's own evaluated listings, as a right-docked panel the
+# user can open/close (not an always-visible section at the bottom of the
+# page, and not a centered modal covering most of the screen - a st.dialog
+# was tried first and covered too much of the page). Dark-themed to match
+# the comparison cards, even though the panel renders outside any
+# [class*="st-key-card_"] container those styles are scoped to.
 CHAT_WIDGET_CSS = """<style>
-.st-key-open_comparison_chat button {
+.st-key-toggle_comparison_chat button {
     position: fixed !important;
     top: 70px !important;
     right: 24px !important;
@@ -450,78 +450,108 @@ CHAT_WIDGET_CSS = """<style>
     box-shadow: 0 0 16px rgba(20,180,160,0.35) !important;
     padding: 0.5rem 1.1rem !important;
 }
-/* [data-testid="stDialog"] itself is the full-viewport backdrop wrapper,
-   not the visible card - confirmed via computed-style inspection (it was
-   1400x1100, covering the whole page, while the actual modal surface is
-   its direct child div at a much smaller rect). Gradient goes on that
-   child, not the backdrop, or the "chat window" look becomes "the whole
-   page turned teal" instead of a modal floating on a dimmed backdrop. */
-[data-testid="stDialog"] > div {
+.st-key-chat_panel {
+    position: fixed !important;
+    top: 118px !important;
+    right: 24px !important;
+    width: 400px !important;
+    max-width: calc(100vw - 48px) !important;
+    max-height: calc(100vh - 150px) !important;
+    overflow-y: auto !important;
+    z-index: 998 !important;
     background: linear-gradient(135deg, #0a2e35 0%, #124a52 50%, #1a6570 100%) !important;
-    border-radius: 20px !important;
+    border: 1px solid rgba(255,255,255,0.25) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 0 24px rgba(20,180,160,0.25) !important;
+    padding: 12px !important;
 }
-[data-testid="stDialog"] p,
-[data-testid="stDialog"] h1,
-[data-testid="stDialog"] h2,
-[data-testid="stDialog"] h3,
-[data-testid="stDialog"] span,
-[data-testid="stDialog"] label {
+.st-key-chat_panel p,
+.st-key-chat_panel h1,
+.st-key-chat_panel h2,
+.st-key-chat_panel h3,
+.st-key-chat_panel span,
+.st-key-chat_panel label {
     color: #ffffff !important;
+}
+/* st.chat_message()'s content wrapper can hold more than plain <p> text -
+   the assistant's answers are LLM markdown and can include bullet lists,
+   bold labels, etc. A user question asking "why" a recommendation was
+   made pulled back a bulleted signal-by-signal summary, and every <li> in
+   it was still Streamlit's default near-black text - not covered by the
+   tag-by-tag rule above. Scoping a wildcard to just the message content
+   (not the whole panel) catches every element markdown can produce
+   without doing this one tag at a time again. */
+.st-key-chat_panel [data-testid="stChatMessageContent"] * {
+    color: #ffffff !important;
+}
+/* Right-align the user's own messages (avatar + bubble swap to the right
+   edge) so the conversation reads like a normal chat thread instead of
+   both sides stacking flush-left. Confirmed via DOM inspection that
+   Streamlit tags each message's avatar with stChatMessageAvatarUser vs
+   stChatMessageAvatarAssistant - a stable, purpose-built hook, not a
+   guess based on visual position. */
+.st-key-chat_panel [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+    flex-direction: row-reverse !important;
+}
+.st-key-chat_panel [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+    [data-testid="stChatMessageContent"] {
+    text-align: right !important;
 }
 </style>"""
 
 
-@st.dialog("CarScout", width="large")
-def _comparison_chat_dialog(ranked_entries, user_name):
-    """Modal chat over the user's own evaluated listings - grounded in the
-    same saved tiles/summaries the comparison grid renders, not a second
-    live-tool-calling agent (see comparison_chat.py). Chat history is keyed
-    by user_name (session_state, not persisted to the DB) so switching the
+def _render_comparison_chat_panel(ranked_entries, user_name):
+    """Chat over the user's own evaluated listings - grounded in the same
+    saved tiles/summaries the comparison grid renders, not a second live-
+    tool-calling agent (see comparison_chat.py). Chat history is keyed by
+    user_name (session_state, not persisted to the DB) so switching the
     name in the sidebar doesn't show one person's chat under another's
     searches - the same scoping the searches themselves already use."""
-    chat_key = f"comparison_chat_history_{user_name}"
-    if chat_key not in st.session_state:
-        st.session_state[chat_key] = [{
-            "role": "assistant",
-            "content": (
-                f"Hi {user_name}! Ask me anything about your evaluated listings - "
-                "which one to pick, how they compare, or details on any signal."
-            ),
-        }]
+    with st.container(key="chat_panel"):
+        title_col, close_col = st.columns([5, 1])
+        with title_col:
+            st.markdown("**💬 CarScout**")
+        with close_col:
+            if st.button("✕", key="close_comparison_chat"):
+                st.session_state["chat_panel_open"] = False
+                st.rerun()
 
-    for msg in st.session_state[chat_key]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+        chat_key = f"comparison_chat_history_{user_name}"
+        if chat_key not in st.session_state:
+            st.session_state[chat_key] = [{
+                "role": "assistant",
+                "content": (
+                    f"Hi {user_name}! Ask me anything about your evaluated listings - "
+                    "which one to pick, how they compare, or details on any signal."
+                ),
+            }]
 
-    if question := st.chat_input("e.g. Which one has the best safety rating?"):
-        # Same moderation gate as the main due-diligence flow (fail closed
-        # on flagged/error) - not the relevance check, though, which is
-        # tuned to reject anything that isn't a car-symptom description and
-        # would wrongly block ordinary comparison questions like "which is
-        # cheapest".
-        moderation = guards.check_moderation(question)
-        if moderation["status"] in ("flagged", "error"):
-            st.error("This input can't be processed - please ask about the listings above.")
-        else:
-            history_before = list(st.session_state[chat_key])
-            st.session_state[chat_key].append({"role": "user", "content": question})
-            with st.spinner("Thinking..."):
-                result = comparison_chat.answer_comparison_question(ranked_entries, question, history_before)
-            if result["status"] == "ok":
-                st.session_state[chat_key].append({"role": "assistant", "content": result["answer"]})
+        for msg in st.session_state[chat_key]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        if question := st.chat_input("e.g. Which one has the best safety rating?"):
+            # Same moderation gate as the main due-diligence flow (fail
+            # closed on flagged/error) - not the relevance check, though,
+            # which is tuned to reject anything that isn't a car-symptom
+            # description and would wrongly block ordinary comparison
+            # questions like "which is cheapest".
+            moderation = guards.check_moderation(question)
+            if moderation["status"] in ("flagged", "error"):
+                st.error("This input can't be processed - please ask about the listings above.")
             else:
-                st.session_state[chat_key].append({
-                    "role": "assistant",
-                    "content": "Something went wrong answering that - please try again.",
-                })
-            # scope="fragment", not the default "app": @st.dialog wraps its
-            # content in a Streamlit fragment, and a plain st.rerun() reruns
-            # the *whole script* by default - which re-evaluates the
-            # `if st.button(...)` that opened this dialog, finds it False
-            # again (buttons only return True on their own click's rerun),
-            # and never reopens it. Scoping the rerun to just this fragment
-            # refreshes the chat display without closing the modal around it.
-            st.rerun(scope="fragment")
+                history_before = list(st.session_state[chat_key])
+                st.session_state[chat_key].append({"role": "user", "content": question})
+                with st.spinner("Thinking..."):
+                    result = comparison_chat.answer_comparison_question(ranked_entries, question, history_before)
+                if result["status"] == "ok":
+                    st.session_state[chat_key].append({"role": "assistant", "content": result["answer"]})
+                else:
+                    st.session_state[chat_key].append({
+                        "role": "assistant",
+                        "content": "Something went wrong answering that - please try again.",
+                    })
+                st.rerun()
 
 
 tab_run, tab_compare = st.tabs(["Run a new check", "Your evaluated listings"])
@@ -701,12 +731,19 @@ with tab_compare:
                             st.session_state["form_symptom"] = entry.symptom
                             st.rerun()
 
-        # Floating top-right button opens the chat above as a modal (see
-        # CHAT_WIDGET_CSS + _comparison_chat_dialog) instead of an always-
-        # visible section at the bottom of the page.
+        # Floating top-right button toggles the chat panel open/closed (see
+        # CHAT_WIDGET_CSS + _render_comparison_chat_panel) - a right-docked
+        # panel the user can minimize back down to just this button, rather
+        # than an always-visible section at the bottom of the page or a
+        # centered modal covering most of the screen.
         st.markdown(CHAT_WIDGET_CSS, unsafe_allow_html=True)
-        if st.button("💬 CarScout", key="open_comparison_chat"):
-            _comparison_chat_dialog(ranked, user_name)
+        st.session_state.setdefault("chat_panel_open", False)
+        toggle_label = "✕ Close" if st.session_state["chat_panel_open"] else "💬 CarScout"
+        if st.button(toggle_label, key="toggle_comparison_chat"):
+            st.session_state["chat_panel_open"] = not st.session_state["chat_panel_open"]
+            st.rerun()
+        if st.session_state["chat_panel_open"]:
+            _render_comparison_chat_panel(ranked, user_name)
 
 with tab_run:
     selected_label = st.selectbox(
