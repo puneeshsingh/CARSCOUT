@@ -169,7 +169,7 @@ DARK_CARD_CSS = """<style>
     padding: 8px 16px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px;
 }
 .dark-title { color: #ffffff; font-size: 21px; font-weight: 700; margin: 4px 18px 6px; }
-.dark-signals { color: rgba(255,255,255,0.62); font-size: 13px; margin: 0 18px 8px; }
+.dark-signals { color: rgba(255,255,255,0.62); font-size: 13px; padding: 4px 0; margin: 0 18px 8px; }
 .dark-price-row {
     display: flex; gap: 12px; align-items: center; color: #ffffff; font-weight: 700;
     font-size: 15px; margin: 18px 18px 18px;
@@ -178,7 +178,17 @@ DARK_CARD_CSS = """<style>
 .dark-info-bar {
     background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
     border-radius: 12px; padding: 14px 18px; color: #ffffff; font-size: 14px;
-    display: flex; align-items: center; gap: 10px; margin: 0 18px 20px;
+    display: flex; align-items: flex-start; gap: 10px; margin: 0 18px 20px;
+    /* Fixed height (not just the signal tiles below it) is what actually
+       keeps the grid consistent card to card - a one-line symptom and a
+       two-line symptom used to push everything below (including the tile
+       grid) to a different vertical start on each card, which read as
+       "the tiles are inconsistent" even though each tile's own height was
+       already locked at 96px. */
+    height: 52px; box-sizing: border-box;
+}
+.dark-info-bar span.symptom-text {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .dark-tile-grid { margin: 0 18px 20px; }
 [class*="st-key-card_"] [role="progressbar"] {
@@ -195,6 +205,9 @@ DARK_CARD_CSS = """<style>
     font-size: 13.5px !important;
     border-radius: 10px !important;
     min-height: 2.2rem !important;
+}
+[class*="st-key-card_"] div[data-testid="stHorizontalBlock"] {
+    margin: 0 18px !important;
 }
 [class*="st-key-card_"] [data-testid="stExpander"] {
     margin: 0 18px 14px;
@@ -507,7 +520,8 @@ with tab_compare:
                     # data) - html.escape() here is load-bearing, not
                     # decorative.
                     st.markdown(
-                        f'<div class="dark-info-bar"><span>ⓘ</span> {html.escape(entry.symptom)}</div>',
+                        f'<div class="dark-info-bar"><span>ⓘ</span>'
+                        f'<span class="symptom-text">{html.escape(entry.symptom)}</span></div>',
                         unsafe_allow_html=True,
                     )
 
