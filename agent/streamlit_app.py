@@ -351,19 +351,6 @@ with tab_run:
                 else:
                     st.write(step["text"])
 
-        st.subheader("Token usage & estimated cost")
-        total_tokens = trace["total_input_tokens"] + trace["total_output_tokens"]
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Input tokens", trace["total_input_tokens"])
-        m2.metric("Output tokens", trace["total_output_tokens"])
-        m3.metric("Total tokens", total_tokens)
-        m4.metric("Est. cost (USD)", f"${trace['estimated_cost_usd']:.5f}")
-        st.caption(
-            f"Estimated using gpt-4o-mini list pricing "
-            f"(${cla.INPUT_PRICE_PER_1M_TOKENS}/1M input, ${cla.OUTPUT_PRICE_PER_1M_TOKENS}/1M output tokens) - "
-            "a rough guide, not an exact bill."
-        )
-
 with tab_compare:
     recent = memory_store.get_recent_searches(memory_engine, user_name=user_name)
     if not user_name:

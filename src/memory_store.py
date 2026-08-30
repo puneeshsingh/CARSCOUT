@@ -134,16 +134,19 @@ def save_search(
     tiles: dict | None = None,
 ) -> None:
     with Session(engine) as session:
-        # Upsert on the search's identity (user + vehicle + listing +
-        # symptom): a re-run of the exact same search - e.g. via "Use this
-        # search" with nothing changed - refreshes that one entry (new
-        # answer, bumped to most recent) instead of cluttering the list with
-        # a duplicate tile. user_name is part of the identity so the same
-        # search by two different people doesn't overwrite each other.
+        # Upsert on the search's identity - user + listing (vehicle, price,
+        # odometer, condition), deliberately NOT including symptom. The
+        # comparison grid's whole point is comparing listings, not
+        # questions - asking a second question about the same curated VIN
+        # should update that one card (new symptom, new answer, new tiles,
+        # bumped to most recent) rather than cloning it into a second
+        # near-identical card. user_name is part of the identity so the
+        # same listing looked up by two different people doesn't overwrite
+        # each other.
         existing = session.scalars(
             select(RecentSearch).filter_by(
                 user_name=user_name, make=make, model=model, year=year, asking_price=asking_price,
-                odometer=odometer, condition=condition, symptom=symptom,
+                odometer=odometer, condition=condition,
             )
         ).first()
 
@@ -151,6 +154,7 @@ def save_search(
 
         if existing:
             existing.created_at = datetime.now(timezone.utc)
+            existing.symptom = symptom
             existing.full_answer = final_answer
             existing.tiles_json = tiles_json
         else:
