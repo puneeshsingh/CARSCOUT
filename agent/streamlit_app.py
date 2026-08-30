@@ -101,17 +101,21 @@ def _signal_squares_html(tiles: dict) -> str:
         tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
         headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
         accent = _CHIP_COLORS[tile["color"]]["accent"]
+        # title/headline are always fixed templates or counts/stars from
+        # classify_tiles(), never free text - escaping isn't fixing a live
+        # bug, just cheap insurance against that invariant changing later.
+        safe_title, safe_headline = html.escape(title), html.escape(headline)
         cells.append(
-            f'<div title="{title}: {headline}" style="display:flex;flex-direction:column;'
+            f'<div title="{safe_title}: {safe_headline}" style="display:flex;flex-direction:column;'
             f'gap:6px;height:96px;padding:14px 16px;border-radius:12px;'
             f'background:rgba(255,255,255,0.07);border:1px solid {accent};overflow:hidden;">'
             f'<div style="display:flex;align-items:center;gap:7px;">'
             f'<span style="font-size:15px;line-height:1;">{SIGNAL_EMOJI[signal]}</span>'
-            f'<span style="font-size:13.5px;font-weight:700;line-height:1.2;color:#ffffff;">{title}</span>'
+            f'<span style="font-size:13.5px;font-weight:700;line-height:1.2;color:#ffffff;">{safe_title}</span>'
             f"</div>"
             f'<span style="font-size:12.5px;line-height:1.4;color:rgba(255,255,255,0.72);'
             f'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">'
-            f"{headline}</span>"
+            f"{safe_headline}</span>"
             f"</div>"
         )
     return (
@@ -187,6 +191,9 @@ DARK_CARD_CSS = """<style>
 }
 [class*="st-key-card_"] [data-testid="stExpander"] {
     margin: 0 6px 14px;
+    background: transparent !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
+    border-radius: 10px !important;
 }
 </style>"""
 
