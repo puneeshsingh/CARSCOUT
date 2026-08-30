@@ -10,7 +10,7 @@ import os
 import re
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, create_engine, delete, select
+from sqlalchemy import Column, DateTime, Float, Integer, String, create_engine, delete, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session
 
@@ -53,6 +53,10 @@ class RecentSearch(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
+    # Nullable for backward compatibility with rows written before named
+    # identity existed - not real auth, just a typed label the UI scopes the
+    # list by (see agent/streamlit_app.py).
+    user_name = Column(String, nullable=True)
     make = Column(String, nullable=False)
     model = Column(String, nullable=False)
     year = Column(Integer, nullable=False)
@@ -86,6 +90,18 @@ def get_engine() -> Engine:
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
 
+    # create_all() only creates missing tables - it doesn't alter an
+    # existing one, and this table already existed (locally and on Render)
+    # before user_name was added. No migration framework in this project
+    # (Alembic would be overkill for one column), so: add it directly if
+    # missing. Idempotent - a no-op once the column exists. ADD COLUMN
+    # syntax here works on both SQLite and Postgres.
+    inspector = inspect(engine)
+    columns = {col["name"] for col in inspector.get_columns("recent_searches")}
+    if "user_name" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE recent_searches ADD COLUMN user_name VARCHAR"))
+
 
 def save_search(
     engine: Engine,
@@ -97,15 +113,18 @@ def save_search(
     condition: str | None,
     symptom: str,
     final_answer: str,
+    user_name: str | None = None,
 ) -> None:
     with Session(engine) as session:
-        # Upsert on the search's identity (vehicle + listing + symptom): a
-        # re-run of the exact same search - e.g. via "Use this search" with
-        # nothing changed - refreshes that one entry (new answer, bumped to
-        # most recent) instead of cluttering the list with a duplicate tile.
+        # Upsert on the search's identity (user + vehicle + listing +
+        # symptom): a re-run of the exact same search - e.g. via "Use this
+        # search" with nothing changed - refreshes that one entry (new
+        # answer, bumped to most recent) instead of cluttering the list with
+        # a duplicate tile. user_name is part of the identity so the same
+        # search by two different people doesn't overwrite each other.
         existing = session.scalars(
             select(RecentSearch).filter_by(
-                make=make, model=model, year=year, asking_price=asking_price,
+                user_name=user_name, make=make, model=model, year=year, asking_price=asking_price,
                 odometer=odometer, condition=condition, symptom=symptom,
             )
         ).first()
@@ -117,6 +136,7 @@ def save_search(
             session.add(
                 RecentSearch(
                     created_at=datetime.now(timezone.utc),
+                    user_name=user_name,
                     make=make,
                     model=model,
                     year=year,
@@ -130,9 +150,11 @@ def save_search(
         session.commit()
 
         # Forgetting policy: keep only the most recent MAX_RECENT_SEARCHES
-        # rows, drop anything older.
+        # rows *for this user*, drop anything older - scoped per user_name so
+        # one active person's searches can't push another's out of the list.
         stale_ids = session.scalars(
             select(RecentSearch.id)
+            .filter_by(user_name=user_name)
             .order_by(RecentSearch.created_at.desc())
             .offset(MAX_RECENT_SEARCHES)
         ).all()
@@ -141,10 +163,15 @@ def save_search(
             session.commit()
 
 
-def get_recent_searches(engine: Engine, limit: int = MAX_RECENT_SEARCHES) -> list[RecentSearch]:
+def get_recent_searches(
+    engine: Engine, user_name: str | None = None, limit: int = MAX_RECENT_SEARCHES
+) -> list[RecentSearch]:
     with Session(engine) as session:
         return list(
             session.scalars(
-                select(RecentSearch).order_by(RecentSearch.created_at.desc()).limit(limit)
+                select(RecentSearch)
+                .filter_by(user_name=user_name)
+                .order_by(RecentSearch.created_at.desc())
+                .limit(limit)
             )
         )

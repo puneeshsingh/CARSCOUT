@@ -24,6 +24,8 @@ if str(SRC_DIR) not in sys.path:
 import complaint_lookup_agent as cla  # noqa: E402  (must load .env first, sets up logging)
 import guards  # noqa: E402
 import memory_store  # noqa: E402  (needs SRC_DIR on sys.path for its `config` import)
+import vin_decode  # noqa: E402
+from config import VIN_DEMO_LISTINGS  # noqa: E402  (config.py is lightweight - no pandas/pinecone import cost)
 
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -62,43 +64,65 @@ def _get_memory_engine():
 
 memory_engine = _get_memory_engine()
 
-# (make, model, default_year) - the same shortlist the retrieval dataset was
-# filtered to when the Pinecone index was built (see CarScout/src/ingest.py).
-# Kept as a plain literal here rather than imported from src/ingest.py to
-# avoid pulling in that module's heavier deps (pandas) just for a 6-entry list.
-VEHICLE_SHORTLIST = [
-    ("Hyundai", "Kona", 2020),
-    ("Mazda", "Mazda3", 2017),
-    ("Kia", "Forte", 2021),
-    ("Hyundai", "Elantra", 2021),
-    ("Honda", "Civic", 2015),
-    ("Toyota", "Corolla", 2016),
+# Curated real listings (real VIN, real price/odometer/condition from the
+# same Craigslist dataset used for price comps) - one per shortlist vehicle.
+# Selecting a VIN fills in the whole listing; only the symptom stays
+# free-text, since that's the buyer's own concern, not something a listing
+# states. See src/config.py for how these were sourced and verified.
+VIN_LABELS = [
+    f"{v['vin']} - {v['year']} {v['make']} {v['model']}"
+    for v in VIN_DEMO_LISTINGS
 ]
-VEHICLE_LABELS = [f"{make} {model} ({year})" for make, model, year in VEHICLE_SHORTLIST]
-VEHICLE_LABEL_BY_MAKE_MODEL = {(make, model): label for (make, model, _), label in zip(VEHICLE_SHORTLIST, VEHICLE_LABELS)}
+LISTING_BY_VIN_LABEL = dict(zip(VIN_LABELS, VIN_DEMO_LISTINGS))
 
-CONDITION_OPTIONS = ["Not sure / skip", "new", "like new", "excellent", "good", "fair", "salvage"]
+# A distinct flat color per vehicle for the placeholder car icon - not real
+# photos (avoids any licensing question over manufacturer images), just a
+# simple visual anchor so each listing reads as a distinct "card."
+VEHICLE_ICON_COLORS = ["#378ADD", "#1D9E75", "#D85A30", "#D4537E", "#BA7517", "#7F77DD"]
+
+
+def _car_icon_svg(color: str) -> str:
+    return f"""<svg viewBox="0 0 64 40" width="72" height="45" role="img" aria-label="Vehicle icon">
+<path d="M8 26 L13 14 Q15 10 20 10 L44 10 Q49 10 51 14 L56 26 L56 32 L50 32 L50 26 L14 26 L14 32 L8 32 Z"
+fill="{color}" stroke="{color}" stroke-width="1"/>
+<circle cx="18" cy="32" r="5" fill="#4a4a4a"/>
+<circle cx="46" cy="32" r="5" fill="#4a4a4a"/>
+</svg>"""
+
 
 DEFAULT_SYMPTOM = "Is engine stalling a known issue for this vehicle?"
 
 # Form fields are session_state-backed (rather than plain `value=` literals)
 # so a "Use this search" click in the Recent Searches sidebar can populate
 # them before the form widgets are created below.
-st.session_state.setdefault("form_vehicle_label", VEHICLE_LABELS[0])
-st.session_state.setdefault("form_year", VEHICLE_SHORTLIST[0][2])
-st.session_state.setdefault("_last_vehicle_label", st.session_state["form_vehicle_label"])
-st.session_state.setdefault("form_price", 15000)
-st.session_state.setdefault("form_odometer", 45000)
-st.session_state.setdefault("form_condition", "Not sure / skip")
+st.session_state.setdefault("form_vin_label", VIN_LABELS[0])
 st.session_state.setdefault("form_symptom", DEFAULT_SYMPTOM)
+st.session_state.setdefault("user_name", "")
+
+# Best-effort (make, model) -> VIN label lookup, used by "Use this search" -
+# reused entries snap to the closest curated listing for that vehicle rather
+# than needing an exact historical match (a pre-VIN saved search, for
+# instance, won't have one).
+VIN_LABEL_BY_MAKE_MODEL = {
+    (v["make"], v["model"]): label for label, v in LISTING_BY_VIN_LABEL.items()
+}
 
 with st.sidebar:
-    st.subheader("Recent searches")
-    st.caption(
-        "Persists across restarts (SQLite locally, Postgres when deployed) - "
-        "no login, so this list is shared across everyone using this app."
+    st.text_input(
+        "Your name",
+        key="user_name",
+        placeholder="e.g. Alex",
+        help="Not a real login - just labels your searches so Recent Searches shows your own history, not everyone's.",
     )
-    recent = memory_store.get_recent_searches(memory_engine)
+    user_name = st.session_state["user_name"].strip() or None
+
+    st.subheader("Recent searches")
+    if user_name:
+        st.caption("Persists across restarts (SQLite locally, Postgres when deployed) - scoped to your name above.")
+    else:
+        st.caption("Enter your name above to save and see your own search history.")
+
+    recent = memory_store.get_recent_searches(memory_engine, user_name=user_name)
     if not recent:
         st.write("No searches yet.")
     for entry in recent:
@@ -115,13 +139,8 @@ with st.sidebar:
             with st.expander("View full report"):
                 st.markdown(_escape_for_markdown(entry.full_answer))
             if st.button("Use this search", key=f"reuse_{entry.id}"):
-                label = VEHICLE_LABEL_BY_MAKE_MODEL.get((entry.make, entry.model), VEHICLE_LABELS[0])
-                st.session_state["form_vehicle_label"] = label
-                st.session_state["_last_vehicle_label"] = label
-                st.session_state["form_year"] = entry.year
-                st.session_state["form_price"] = entry.asking_price
-                st.session_state["form_odometer"] = entry.odometer
-                st.session_state["form_condition"] = entry.condition or "Not sure / skip"
+                label = VIN_LABEL_BY_MAKE_MODEL.get((entry.make, entry.model), VIN_LABELS[0])
+                st.session_state["form_vin_label"] = label
                 st.session_state["form_symptom"] = entry.symptom
                 st.rerun()
 
@@ -133,30 +152,31 @@ st.caption(
     "its own training knowledge."
 )
 
-col1, col2 = st.columns([2, 1])
-with col1:
-    selected_label = st.selectbox("Vehicle", VEHICLE_LABELS, key="form_vehicle_label")
-selected_make, selected_model, selected_default_year = VEHICLE_SHORTLIST[VEHICLE_LABELS.index(selected_label)]
+col_icon, col_form = st.columns([1, 5])
+vehicle_index = VIN_LABELS.index(st.session_state["form_vin_label"])
 
-if selected_label != st.session_state["_last_vehicle_label"]:
-    # Vehicle just changed (by the user, or by a "Use this search" click that
-    # didn't also set the year) - follow that vehicle's default year.
-    st.session_state["form_year"] = selected_default_year
-    st.session_state["_last_vehicle_label"] = selected_label
+with col_icon:
+    st.markdown(_car_icon_svg(VEHICLE_ICON_COLORS[vehicle_index]), unsafe_allow_html=True)
+with col_form:
+    selected_label = st.selectbox("Choose a listing (VIN)", VIN_LABELS, key="form_vin_label")
+    listing = LISTING_BY_VIN_LABEL[selected_label]
 
-with col2:
-    year = st.number_input("Year", min_value=1990, max_value=2030, step=1, key="form_year")
+make, vehicle_model, year = listing["make"], listing["model"], listing["year"]
+asking_price, odometer, condition = listing["price"], listing["odometer"], listing["condition"]
+condition_text = condition or "condition not stated"
 
-make, vehicle_model = selected_make, selected_model
-
-col3, col4, col5 = st.columns(3)
-with col3:
-    asking_price = st.number_input("Asking price ($)", min_value=0, step=500, key="form_price")
-with col4:
-    odometer = st.number_input("Odometer (miles)", min_value=0, step=1000, key="form_odometer")
-with col5:
-    condition_choice = st.selectbox("Condition", CONDITION_OPTIONS, key="form_condition")
-condition = None if condition_choice == "Not sure / skip" else condition_choice
+with st.spinner("Decoding VIN..."):
+    decoded = vin_decode.decode_vin(listing["vin"])
+if decoded["status"] == "ok":
+    st.caption(
+        f"Decoded live via NHTSA: {decoded['year']} {decoded['make']} {decoded['model']} - "
+        f"${asking_price:,} - {odometer:,} mi - {condition_text}."
+    )
+else:
+    st.caption(
+        f"NHTSA decode unavailable right now - using the listing's own data: "
+        f"{year} {make} {vehicle_model} - ${asking_price:,} - {odometer:,} mi - {condition_text}."
+    )
 
 symptom = st.text_input("Symptom / question", key="form_symptom")
 
@@ -167,21 +187,10 @@ if st.button("Run agent", type="primary"):
     model_clean = vehicle_model.strip()
     symptom_clean = symptom.strip()
 
-    errors = []
-    if not make_clean or not model_clean:
-        errors.append("Please enter both make and model before running the agent.")
-    if year is None:
-        errors.append("Please enter a valid year before running the agent.")
-    if not asking_price or asking_price <= 0:
-        errors.append("Please enter the listing's asking price before running the agent.")
-    if not odometer or odometer <= 0:
-        errors.append("Please enter the listing's odometer reading before running the agent.")
+    # Vehicle/price/odometer/condition all come from the curated listing, not
+    # free text, so only the symptom needs validating here.
     if not symptom_clean:
-        errors.append("Please describe a symptom or ask a question before running the agent.")
-
-    if errors:
-        for error in errors:
-            st.error(error)
+        st.error("Please describe a symptom or ask a question before running the agent.")
         st.stop()
 
     # Gate 1: moderation - must run before the relevance check and before the
@@ -237,16 +246,50 @@ if st.button("Run agent", type="primary"):
         memory_store.save_search(
             memory_engine, make_clean, model_clean, int(year),
             float(asking_price), int(odometer), condition, symptom_clean,
-            final_answer,
+            final_answer, user_name=user_name,
         )
 
+    st.subheader("At a glance")
+    tile_titles = {
+        "reliability": "Reliability", "price": "Price fairness",
+        "recalls": "Recall history", "safety": "Safety rating",
+    }
+    # Deterministic red/amber/green from classify_tiles() in
+    # complaint_lookup_agent.py, not chosen by the model - st.error/warning/
+    # success are Streamlit's own semantic red/amber/green containers, so
+    # this reuses native theming instead of hand-rolled colored HTML.
+    tile_renderers = {"red": st.error, "amber": st.warning, "green": st.success}
+    tile_cols = st.columns(4)
+    tile_colors = []
+    for col, (signal, title) in zip(tile_cols, tile_titles.items()):
+        tile = trace["tiles"].get(signal, {"color": "amber", "headline": "No data"})
+        tile_colors.append(tile["color"])
+        with col:
+            tile_renderers[tile["color"]](f"**{title}**\n\n{tile['headline']}")
+
     st.subheader("Final answer")
-    if trace["is_no_confident_match"]:
-        # Amber, not green - a no-confident-match result is not a "clean
-        # bill of health" and shouldn't be styled like a reassuring success.
-        st.warning(_escape_for_markdown(final_answer))
+    # Same severity the tiles above already show - a report can't lead with
+    # a red "known reliability issue" tile and then wrap the exact same
+    # finding in a green success box underneath.
+    if "red" in tile_colors:
+        overall_color = "red"
+    elif "amber" in tile_colors:
+        overall_color = "amber"
     else:
-        st.success(_escape_for_markdown(final_answer))
+        overall_color = "green"
+    tile_renderers[overall_color](_escape_for_markdown(final_answer))
+
+    report_header = (
+        f"# Due-diligence report: {year} {make} {vehicle_model}\n\n"
+        f"Asking price: ${asking_price:,.0f} | Odometer: {odometer:,} mi | "
+        f"Symptom: {symptom_clean}\n\n---\n\n"
+    )
+    st.download_button(
+        "Download full report",
+        data=report_header + final_answer,
+        file_name=f"carscout_{make}_{vehicle_model}_{year}.md".replace(" ", "_"),
+        mime="text/markdown",
+    )
 
     st.subheader("Think → Act → Observe trace")
     if not trace["steps"]:

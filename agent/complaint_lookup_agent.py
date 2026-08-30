@@ -353,6 +353,79 @@ def _apply_deterministic_formatting(final_answer: str, price_result: dict | None
     return final_answer
 
 
+def classify_tiles(
+    search_complaints_result: dict | None,
+    price_result: dict | None,
+    recall_result: dict | None,
+    safety_result: dict | None,
+) -> dict:
+    """Deterministic red/amber/green classification for the 4 report signals,
+    computed directly from each tool's own status/verdict field - never left
+    to the LLM to color-code, matching this project's established pattern of
+    not trusting free-form generation for anything that needs to be
+    reproducible (see _format_no_confident_match_answer,
+    _apply_deterministic_formatting).
+
+    Returns {signal: {"color": "red"|"amber"|"green", "headline": str}}.
+    A missing/None tool result (e.g. the run hit the step cap before calling
+    it) falls back to an amber "no data" tile rather than guessing.
+    """
+    tiles = {}
+
+    if search_complaints_result and search_complaints_result.get("status") == "ok":
+        tiles["reliability"] = {"color": "red", "headline": "Known reliability issue found"}
+    elif search_complaints_result and search_complaints_result.get("status") == "no_confident_match":
+        # Never green - absence of a confident match is not proof the
+        # vehicle is problem-free, and the report itself never claims that.
+        if search_complaints_result.get("closest_candidate"):
+            tiles["reliability"] = {"color": "amber", "headline": "A related report exists, not confirmed"}
+        else:
+            tiles["reliability"] = {"color": "amber", "headline": "No complaint data on record"}
+    else:
+        tiles["reliability"] = {"color": "amber", "headline": "No data"}
+
+    if price_result and price_result.get("status") == "ok":
+        verdict = price_result.get("verdict")
+        if verdict == "at_market":
+            tiles["price"] = {"color": "green", "headline": "Priced about right"}
+        elif verdict == "below_market":
+            tiles["price"] = {"color": "amber", "headline": "Below market - worth asking why"}
+        elif verdict == "above_market":
+            tiles["price"] = {"color": "amber", "headline": "Above market - room to negotiate"}
+        else:
+            tiles["price"] = {"color": "amber", "headline": "No data"}
+    else:
+        tiles["price"] = {"color": "amber", "headline": "Not enough comparable listings"}
+
+    if recall_result and recall_result.get("status") == "none_found":
+        tiles["recalls"] = {"color": "green", "headline": "No recalls on record"}
+    elif recall_result and recall_result.get("status") == "ok":
+        count = len(recall_result.get("recalls") or [])
+        # Never red - a recall is history to verify by VIN, not a confirmed
+        # live defect on this specific vehicle (see SYSTEM_PROMPT).
+        tiles["recalls"] = {"color": "amber", "headline": f"{count} recall(s) on record - verify by VIN"}
+    else:
+        tiles["recalls"] = {"color": "amber", "headline": "No data"}
+
+    if safety_result and safety_result.get("status") == "ok":
+        try:
+            stars = int(safety_result.get("overall_rating"))
+        except (TypeError, ValueError):
+            stars = None
+        if stars is not None and stars >= 4:
+            tiles["safety"] = {"color": "green", "headline": f"{stars}-star overall rating"}
+        elif stars is not None and stars >= 3:
+            tiles["safety"] = {"color": "amber", "headline": f"{stars}-star overall rating"}
+        elif stars is not None:
+            tiles["safety"] = {"color": "red", "headline": f"{stars}-star overall rating"}
+        else:
+            tiles["safety"] = {"color": "amber", "headline": "Rating on file, unparsed"}
+    else:
+        tiles["safety"] = {"color": "amber", "headline": "No rating on file"}
+
+    return tiles
+
+
 async def _stream_events(
     make: str,
     vehicle_model: str,
@@ -390,6 +463,8 @@ async def _stream_events(
     queries_tried: list[str] = []
     search_complaints_result: dict | None = None
     price_check_result: dict | None = None
+    recall_result: dict | None = None
+    safety_result: dict | None = None
 
     try:
         # A fresh in-memory MCP session per run - the session (and the tools/
@@ -467,6 +542,10 @@ async def _stream_events(
                                 search_complaints_result = parsed
                             elif called_tool == "check_price_estimate" and isinstance(parsed, dict) and "status" in parsed:
                                 price_check_result = parsed
+                            elif called_tool == "check_recalls" and isinstance(parsed, dict) and "status" in parsed:
+                                recall_result = parsed
+                            elif called_tool == "check_safety_rating" and isinstance(parsed, dict) and "status" in parsed:
+                                safety_result = parsed
     except GraphRecursionError:
         yield ("capped", {"max_steps": MAX_STEPS})
         final_answer = (
@@ -495,6 +574,8 @@ async def _stream_events(
     if final_answer:
         final_answer = _apply_deterministic_formatting(final_answer, price_check_result)
 
+    tiles = classify_tiles(search_complaints_result, price_check_result, recall_result, safety_result)
+
     yield (
         "done",
         {
@@ -502,6 +583,7 @@ async def _stream_events(
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
             "is_no_confident_match": is_no_confident_match,
+            "tiles": tiles,
         },
     )
 
@@ -577,6 +659,7 @@ async def _run_with_trace_async(
         "total_output_tokens": 0,
         "hit_step_cap": False,
         "is_no_confident_match": False,
+        "tiles": {},
     }
     async for phase, payload in _stream_events(
         make, vehicle_model, year, symptom, asking_price, odometer, condition=condition
@@ -590,6 +673,7 @@ async def _run_with_trace_async(
             result["total_input_tokens"] = payload["total_input_tokens"]
             result["total_output_tokens"] = payload["total_output_tokens"]
             result["is_no_confident_match"] = payload["is_no_confident_match"]
+            result["tiles"] = payload["tiles"]
 
     result["steps"] = steps
     result["estimated_cost_usd"] = (
