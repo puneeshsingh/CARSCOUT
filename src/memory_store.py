@@ -6,6 +6,7 @@ Streamlit UI, not fed into the agent's own reasoning; the agent's hard rules
 live in complaint_lookup_agent.py's SYSTEM_PROMPT, unrelated to this store.
 """
 
+import json
 import os
 import re
 from datetime import datetime, timezone
@@ -65,6 +66,19 @@ class RecentSearch(Base):
     condition = Column(String, nullable=True)
     symptom = Column(String, nullable=False)
     full_answer = Column(String, nullable=False)
+    # JSON-encoded output of classify_tiles() (agent/complaint_lookup_agent.py)
+    # captured at save time, so the main-page comparison grid can show each
+    # past search's red/amber/green summary without re-running the agent.
+    # Nullable for rows saved before this existed.
+    tiles_json = Column(String, nullable=True)
+
+    def tiles(self) -> dict:
+        if not self.tiles_json:
+            return {}
+        try:
+            return json.loads(self.tiles_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
 
 
 def _database_url() -> str:
@@ -101,6 +115,9 @@ def init_db(engine: Engine) -> None:
     if "user_name" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE recent_searches ADD COLUMN user_name VARCHAR"))
+    if "tiles_json" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE recent_searches ADD COLUMN tiles_json VARCHAR"))
 
 
 def save_search(
@@ -114,6 +131,7 @@ def save_search(
     symptom: str,
     final_answer: str,
     user_name: str | None = None,
+    tiles: dict | None = None,
 ) -> None:
     with Session(engine) as session:
         # Upsert on the search's identity (user + vehicle + listing +
@@ -129,9 +147,12 @@ def save_search(
             )
         ).first()
 
+        tiles_json = json.dumps(tiles) if tiles else None
+
         if existing:
             existing.created_at = datetime.now(timezone.utc)
             existing.full_answer = final_answer
+            existing.tiles_json = tiles_json
         else:
             session.add(
                 RecentSearch(
@@ -145,6 +166,7 @@ def save_search(
                     condition=condition,
                     symptom=symptom,
                     full_answer=final_answer,
+                    tiles_json=tiles_json,
                 )
             )
         session.commit()

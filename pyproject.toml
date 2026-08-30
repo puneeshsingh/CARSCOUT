@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "deepagents>=0.7.6",
+    "fpdf2>=2.8.8",
     "httpx>=0.28.1",
     "langchain-mcp-adapters>=0.3.2",
     "langchain-openai>=1.5.1",

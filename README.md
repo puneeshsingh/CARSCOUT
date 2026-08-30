@@ -46,6 +46,7 @@ Each curated VIN is also decoded live against NHTSA's free vPIC API (`src/vin_de
 - `src/safety_rating.py` — live NHTSA crash-test rating lookup.
 - `src/vin_decode.py` — live VIN decode via NHTSA's vPIC API (see [VIN-based input](#vin-based-input)).
 - `src/memory_store.py` — durable "recent searches" memory store (SQLite/Postgres via SQLAlchemy), scoped by name.
+- `src/report_pdf.py` — builds a downloadable PDF version of a report (`fpdf2`, no system-level dependencies).
 - `mcp_server/server.py` — exposes all four checks as MCP tools.
 - `agent/complaint_lookup_agent.py` — the deep agent and its due-diligence system prompt.
 - `agent/streamlit_app.py` — demo UI (Streamlit).
@@ -66,12 +67,12 @@ Runs 27 cases (happy-path, edge-case, adversarial/prompt-injection, and guardrai
 
 ## Week 5: memory & deployment
 
-**Memory** — CarScout has no real login, but does have a lightweight named identity: a "Your name" field in the sidebar scopes **recent searches** to that name, so it's per-person rather than one shared list. Not real auth (anyone can type any name, there's no password) - a deliberate, disclosed trade-off for a demo/portfolio tool, not an oversight. Leaving the name blank falls back to the original shared/anonymous list (also how rows saved before this existed still show up).
+**Memory** — CarScout has no real login, but does have a lightweight named identity: a "Your name" field in the sidebar scopes searches to that name, so it's per-person rather than one shared list. Not real auth (anyone can type any name, there's no password) - a deliberate, disclosed trade-off for a demo/portfolio tool, not an oversight. Leaving the name blank falls back to the original shared/anonymous list (also how rows saved before this existed still show up).
 
-- **What gets stored**: each completed due-diligence run's inputs (make, model, year, asking price, odometer, condition, symptom, and the name typed in, if any) plus a short preview (~200 chars) of the agent's final answer. Full tool traces and raw retrieval output are *not* stored - only the durable, human-meaningful facts.
+- **What gets stored**: each completed due-diligence run's inputs (make, model, year, asking price, odometer, condition, symptom, the name typed in if any) plus the full report text and its red/amber/green tile classification (so past searches can be compared visually without re-running the agent). Full tool traces and raw retrieval output are *not* stored - only the durable, human-meaningful facts.
 - **When**: after a run finishes with a real answer. Runs that hit the step cap without a confident answer are not saved - the write gate only keeps stable, high-confidence facts.
 - **Where**: `src/memory_store.py`, one `recent_searches` table via SQLAlchemy - SQLite locally (`data_cache/memory.db`) when `DATABASE_URL` is unset, Postgres in production when it is (Render sets this automatically for an attached Postgres instance). Same code path either way.
-- **Retrieval**: the Streamlit sidebar reads the most recent rows for the current name on every page load and renders them.
+- **Retrieval**: the "Your evaluated listings" tab reads the current name's saved searches on every page load and renders them as a grid of comparable cards, each with its own PDF download - a visual side-by-side view rather than a plain list.
 - **Forgetting policy**: only the 20 most recent searches *per name* are kept; older rows for that name are deleted on write.
 
 Cross-session recall is proven the way the syllabus's own bar describes it: write a search, kill the process, restart it, and the entry is still there without re-entering anything - verified locally (SQLite) and against the deployed Render instance (Postgres, see below).
