@@ -376,6 +376,15 @@ with tab_run:
         model_clean = vehicle_model.strip()
         symptom_clean = symptom.strip()
 
+        # Every search should be tied to someone, not saved anonymously -
+        # checked before anything else runs, same as the symptom check
+        # below. (tab_compare already finished rendering earlier in this
+        # same script run, so st.stop() here is safe - it only cuts off the
+        # rest of this tab, not the comparison grid.)
+        if not user_name:
+            st.error("Please enter your name in the sidebar before running a check.")
+            st.stop()
+
         # Vehicle/price/odometer/condition all come from the curated listing,
         # not free text, so only the symptom needs validating here.
         if not symptom_clean:
@@ -441,7 +450,7 @@ with tab_run:
             final_answer = guards.INJECTION_NOTE + final_answer
 
         if trace["hit_step_cap"]:
-            st.warning(f"Agent hit the {cla.MAX_STEPS}-step cap without a confident final answer (failed closed).")
+            st.session_state["last_result"] = {"hit_step_cap": True}
         else:
             # Write gate: only save runs that produced a real answer, not a
             # step-cap failure - matches the "stable, high-confidence facts
@@ -451,38 +460,59 @@ with tab_run:
                 float(asking_price), int(odometer), condition, symptom_clean,
                 final_answer, user_name=user_name, tiles=trace["tiles"],
             )
+            st.session_state["last_result"] = {
+                "hit_step_cap": False,
+                "make": make, "vehicle_model": vehicle_model, "year": year,
+                "asking_price": asking_price, "odometer": odometer, "symptom": symptom_clean,
+                "final_answer": final_answer, "tiles": trace["tiles"], "steps": trace["steps"],
+            }
 
-        st.subheader("At a glance")
-        tile_cols = st.columns(4)
-        for col, (signal, title) in zip(tile_cols, TILE_TITLES.items()):
-            tile = trace["tiles"].get(signal, {"color": "amber", "headline": "No data"})
-            headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
-            with col:
-                TILE_RENDERERS[tile["color"]](f"**{title}**\n\n{headline}", icon=TILE_ICONS[signal])
+        # A plain rerun (not just falling through to render below) so
+        # tab_compare - which runs earlier in this same script - reads the
+        # freshly-saved row on the next pass instead of the stale one it
+        # already rendered before this button's handler even ran. The
+        # result itself is rendered from session_state below, outside this
+        # button block, specifically so it survives that rerun instead of
+        # vanishing (st.button() only returns True on the one rerun the
+        # actual click triggers).
+        st.rerun()
 
-        st.subheader("Final answer")
-        TILE_RENDERERS[_overall_color(trace["tiles"])](_escape_for_markdown(final_answer))
+    result = st.session_state.get("last_result")
+    if result:
+        if result["hit_step_cap"]:
+            st.warning(f"Agent hit the {cla.MAX_STEPS}-step cap without a confident final answer (failed closed).")
+        else:
+            st.subheader("At a glance")
+            tile_cols = st.columns(4)
+            for col, (signal, title) in zip(tile_cols, TILE_TITLES.items()):
+                tile = result["tiles"].get(signal, {"color": "amber", "headline": "No data"})
+                headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
+                with col:
+                    TILE_RENDERERS[tile["color"]](f"**{title}**\n\n{headline}", icon=TILE_ICONS[signal])
 
-        pdf_bytes = report_pdf.build_report_pdf(
-            f"{year} {make} {vehicle_model}",
-            f"${asking_price:,.0f} - {odometer:,} mi - {symptom_clean}",
-            trace["tiles"], final_answer,
-        )
-        st.download_button(
-            "Download full report (PDF)",
-            data=pdf_bytes,
-            file_name=f"carscout_{make}_{vehicle_model}_{year}.pdf".replace(" ", "_"),
-            mime="application/pdf",
-            type="primary", icon=":material/download:",
-        )
+            st.subheader("Final answer")
+            TILE_RENDERERS[_overall_color(result["tiles"])](_escape_for_markdown(result["final_answer"]))
 
-        with st.expander("Show technical trace (Think → Act → Observe)", expanded=False):
-            if not trace["steps"]:
-                st.write("No steps recorded.")
-            for i, step in enumerate(trace["steps"], start=1):
-                label = PHASE_LABELS.get(step["phase"], step["phase"].upper())
-                st.caption(f"{i}. {label}")
-                if step["phase"] == "act":
-                    st.code(f"{step['tool']}({step['args']})", language="python")
-                else:
-                    st.write(step["text"])
+            pdf_bytes = report_pdf.build_report_pdf(
+                f"{result['year']} {result['make']} {result['vehicle_model']}",
+                f"${result['asking_price']:,.0f} - {result['odometer']:,} mi - {result['symptom']}",
+                result["tiles"], result["final_answer"],
+            )
+            st.download_button(
+                "Download full report (PDF)",
+                data=pdf_bytes,
+                file_name=f"carscout_{result['make']}_{result['vehicle_model']}_{result['year']}.pdf".replace(" ", "_"),
+                mime="application/pdf",
+                type="primary", icon=":material/download:",
+            )
+
+            with st.expander("Show technical trace (Think → Act → Observe)", expanded=False):
+                if not result["steps"]:
+                    st.write("No steps recorded.")
+                for i, step in enumerate(result["steps"], start=1):
+                    label = PHASE_LABELS.get(step["phase"], step["phase"].upper())
+                    st.caption(f"{i}. {label}")
+                    if step["phase"] == "act":
+                        st.code(f"{step['tool']}({step['args']})", language="python")
+                    else:
+                        st.write(step["text"])
