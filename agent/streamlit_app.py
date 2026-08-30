@@ -207,6 +207,12 @@ DARK_CARD_CSS = """<style>
     min-height: 2.2rem !important;
 }
 [class*="st-key-card_"] div[data-testid="stHorizontalBlock"] {
+    /* Streamlit sets this block's own width explicitly (not "auto"), so a
+       plain margin shifts the box right without shrinking it - it just
+       overflows past the card's edge on the right instead of centering
+       inside it. width:calc(100% - 36px) forces the actual shrink the
+       margin was supposed to cause. */
+    width: calc(100% - 36px) !important;
     margin: 0 18px !important;
 }
 [class*="st-key-card_"] [data-testid="stExpander"] {
