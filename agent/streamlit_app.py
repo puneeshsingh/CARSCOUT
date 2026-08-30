@@ -25,6 +25,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+import comparison_chat  # noqa: E402
 import complaint_lookup_agent as cla  # noqa: E402  (must load .env first, sets up logging)
 import guards  # noqa: E402
 import memory_store  # noqa: E402  (needs SRC_DIR on sys.path for its `config` import)
@@ -155,7 +156,13 @@ DARK_CARD_CSS = """<style>
     padding: 4px !important;
 }
 [class*="st-key-card_"] [data-testid="stExpander"] p,
+[class*="st-key-card_"] [data-testid="stExpander"] span,
 [class*="st-key-card_"] [data-testid="stExpander"] summary {
+    /* st.text()'s preview line renders as a bare <span> with Streamlit's
+       default near-black body color (rgb(49,51,63)), not covered by the
+       <p>/<summary> rule below it - confirmed via computed style inspection
+       that every other element in here (the <p>/<strong> tags from
+       st.markdown()) was already white, only this one span wasn't. */
     color: #ffffff !important;
 }
 .dark-badge-row { display: flex; gap: 10px; margin: 18px 18px; flex-wrap: wrap; }
@@ -598,6 +605,43 @@ with tab_compare:
                             st.session_state["form_vin_label"] = label
                             st.session_state["form_symptom"] = entry.symptom
                             st.rerun()
+
+        # Chat over the listings above - grounded in the same saved tiles/
+        # summaries just rendered, not a second live-tool-calling agent (see
+        # comparison_chat.py). Keyed by user_name so switching the name in
+        # the sidebar doesn't show one person's chat history under another's
+        # searches - the same scoping the searches themselves already use.
+        st.divider()
+        st.subheader("Ask about your evaluated listings")
+        chat_key = f"comparison_chat_history_{user_name}"
+        st.session_state.setdefault(chat_key, [])
+
+        for msg in st.session_state[chat_key]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        if question := st.chat_input("e.g. Which one has the best safety rating?"):
+            # Same moderation gate as the main due-diligence flow (fail
+            # closed on flagged/error) - not the relevance check, though,
+            # which is tuned to reject anything that isn't a car-symptom
+            # description and would wrongly block ordinary comparison
+            # questions like "which is cheapest".
+            moderation = guards.check_moderation(question)
+            if moderation["status"] in ("flagged", "error"):
+                st.error("This input can't be processed - please ask about the listings above.")
+            else:
+                history_before = list(st.session_state[chat_key])
+                st.session_state[chat_key].append({"role": "user", "content": question})
+                with st.spinner("Thinking..."):
+                    result = comparison_chat.answer_comparison_question(ranked, question, history_before)
+                if result["status"] == "ok":
+                    st.session_state[chat_key].append({"role": "assistant", "content": result["answer"]})
+                else:
+                    st.session_state[chat_key].append({
+                        "role": "assistant",
+                        "content": "Something went wrong answering that - please try again.",
+                    })
+                st.rerun()
 
 with tab_run:
     selected_label = st.selectbox(
