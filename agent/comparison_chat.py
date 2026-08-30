@@ -55,30 +55,39 @@ def _format_listing(entry) -> str:
     )
 
 
-def answer_comparison_question(entries: list, question: str, chat_history: list[dict]) -> dict:
-    """entries: memory_store.RecentSearch rows for the current user, in
+def _build_messages(entries: list, question: str, chat_history: list[dict]) -> list[dict]:
+    listings_block = "\n\n".join(_format_listing(e) for e in entries)
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(listings_block=listings_block)
+    return [{"role": "system", "content": system_prompt}, *chat_history, {"role": "user", "content": question}]
+
+
+def stream_comparison_answer(entries: list, question: str, chat_history: list[dict]):
+    """Yields the assistant's answer as text chunks arrive, for
+    st.write_stream() in streamlit_app.py - it renders each chunk live and
+    hands back the fully concatenated string once the stream ends, which is
+    what actually gets saved to chat history (same content either way, just
+    not held back until the whole answer is done).
+
+    entries: memory_store.RecentSearch rows for the current user, in
     whatever order the comparison grid already shows them in.
     chat_history: prior turns as [{"role": "user"|"assistant", "content": str}, ...],
     NOT including `question` itself.
 
-    Returns {"status": "ok", "answer": str} or {"status": "error", "error": str}.
-    Fails open at the call site (see streamlit_app.py) with a plain "something
-    went wrong" message - this is a convenience feature over already-saved
-    data, not a safety gate, so an API hiccup here should never look like a
-    real finding about a vehicle.
+    Raises on failure (network/API error) instead of returning an
+    {"status": "error"} dict like the previous blocking version did -
+    st.write_stream() can't swap in a fallback message mid-stream, so the
+    caller wraps the whole call in try/except (see streamlit_app.py) rather
+    than checking a status field afterward.
     """
-    listings_block = "\n\n".join(_format_listing(e) for e in entries)
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(listings_block=listings_block)
-    messages = [{"role": "system", "content": system_prompt}, *chat_history, {"role": "user", "content": question}]
-    try:
-        response = _client.chat.completions.create(
-            model=COMPARISON_CHAT_MODEL,
-            temperature=0,
-            messages=messages,
-        )
-        answer = response.choices[0].message.content
-        logger.info("COMPARISON_CHAT -> question=%r", question)
-        return {"status": "ok", "answer": answer}
-    except Exception as e:
-        logger.error("COMPARISON_CHAT failed: %s", e)
-        return {"status": "error", "error": str(e)}
+    messages = _build_messages(entries, question, chat_history)
+    stream = _client.chat.completions.create(
+        model=COMPARISON_CHAT_MODEL,
+        temperature=0,
+        messages=messages,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+    logger.info("COMPARISON_CHAT (streamed) -> question=%r", question)
