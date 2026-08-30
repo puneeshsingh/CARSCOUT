@@ -8,6 +8,7 @@ For the bootcamp cohort demo. Not polished, not for production use.
 """
 
 import base64
+import html
 import re
 import sys
 from datetime import timezone
@@ -69,28 +70,21 @@ def _starred_headline(headline: str) -> str:
     return f"{'★' * stars}{'☆' * (5 - stars)}  ({headline})"
 
 
-# Native st.error/warning/success (still used for the recommend/avoid rank
-# badge) are too padded for a per-signal tile - four of them stacked (or
-# even four flat full-width chips) read as stretched-out bars, not a quick
-# scannable summary. These render the same severity color as a 2x2 grid of
-# small, equal-size, square-ish tiles instead - plain Unicode icons rather
-# than Streamlit's `:material/` ligature syntax, since that only resolves
-# inside native st.* calls, not raw HTML. Every value interpolated in here
-# comes from classify_tiles()'s fixed headline templates (TILE_TITLES keys,
-# signal counts, star ratings) - never free-text user input - so this is
-# safe to render as raw HTML.
+# Comparison-grid cards render on a dark gradient (DARK_CARD_CSS below), not
+# white - a per-signal tile tinted with its own severity color (a past
+# version of this) reads fine on white but camouflages on a dark background
+# just as badly as it did on a green-tinted one. These stay a flat
+# translucent "glass" tile with the severity color shown only as a border
+# accent - readable regardless of what's behind them. Plain Unicode icons
+# rather than Streamlit's `:material/` ligature syntax, since that only
+# resolves inside native st.* calls, not raw HTML. Every value interpolated
+# in here comes from classify_tiles()'s fixed headline templates
+# (TILE_TITLES keys, signal counts, star ratings) - never free-text user
+# input - so this is safe to render as raw HTML.
 _CHIP_COLORS = {
-    "red": {"bg": "rgba(224, 49, 49, 0.12)", "accent": "#e03131"},
-    "amber": {"bg": "rgba(232, 131, 12, 0.14)", "accent": "#e8830c"},
-    "green": {"bg": "rgba(43, 138, 62, 0.12)", "accent": "#2b8a3e"},
-}
-# A whole comparison-grid card gets tinted with this (see the recommend/
-# avoid logic below) - a noticeably stronger tint than a small chip needs,
-# since it's meant to read as "this card is green/red" at a glance, not
-# just a faint hint.
-_CARD_TINTS = {
-    "red": {"bg": "rgba(224, 49, 49, 0.28)", "accent": "#e03131"},
-    "green": {"bg": "rgba(43, 138, 62, 0.28)", "accent": "#2b8a3e"},
+    "red": {"accent": "#f87171"},
+    "amber": {"accent": "#fbbf24"},
+    "green": {"accent": "#4ade80"},
 }
 SIGNAL_EMOJI = {"reliability": "🔧", "price": "🏷️", "recalls": "📢", "safety": "🛡️"}
 
@@ -101,35 +95,100 @@ def _signal_squares_html(tiles: dict) -> str:
     cell sizes regardless of headline length, which four separate Streamlit
     widgets never would. Headline text that's too long to fit is clamped to
     3 lines with an ellipsis; the full text is still available as a native
-    hover tooltip and, always, in "View full report" below.
-
-    Deliberately opaque white, not a tint of the tile's own severity color:
-    the whole card can also be tinted green/red (see the recommend/avoid
-    logic below), and a light-green tile on a light-green card background
-    was reading as no tile at all. The severity color still shows, just as
-    a solid border instead of a fill - readable against any card color."""
+    hover tooltip and, always, in "View full report" below."""
     cells = []
     for signal, title in TILE_TITLES.items():
         tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
         headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
-        style = _CHIP_COLORS[tile["color"]]
+        accent = _CHIP_COLORS[tile["color"]]["accent"]
         cells.append(
             f'<div title="{title}: {headline}" style="display:flex;flex-direction:column;'
-            f'gap:3px;height:104px;padding:8px 10px;border-radius:8px;'
-            f'background:rgba(255,255,255,0.92);border:2px solid {style["accent"]};overflow:hidden;">'
-            f'<div style="display:flex;align-items:center;gap:5px;">'
-            f'<span style="font-size:16px;line-height:1;">{SIGNAL_EMOJI[signal]}</span>'
-            f'<span style="font-size:12.5px;font-weight:700;line-height:1.2;color:#1a1a2e;">{title}</span>'
+            f'gap:6px;height:96px;padding:14px 16px;border-radius:12px;'
+            f'background:rgba(255,255,255,0.07);border:1px solid {accent};overflow:hidden;">'
+            f'<div style="display:flex;align-items:center;gap:7px;">'
+            f'<span style="font-size:15px;line-height:1;">{SIGNAL_EMOJI[signal]}</span>'
+            f'<span style="font-size:13.5px;font-weight:700;line-height:1.2;color:#ffffff;">{title}</span>'
             f"</div>"
-            f'<span style="font-size:12px;line-height:1.35;color:#333333;display:-webkit-box;'
-            f'-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">{headline}</span>'
+            f'<span style="font-size:12.5px;line-height:1.4;color:rgba(255,255,255,0.72);'
+            f'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">'
+            f"{headline}</span>"
             f"</div>"
         )
     return (
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;">'
         + "".join(cells)
         + "</div>"
     )
+
+
+# Recommended/lowest-ranked cards get a colored border on top of the shared
+# dark-card look below - gold for "choose this", red for "consider
+# carefully". Everyone in between keeps the default glass border.
+CARD_BORDER_RECOMMENDED = "#f5c542"
+CARD_BORDER_LOWEST = "#e03131"
+
+# One shared block, injected once (not per-card) - a CSS attribute selector
+# ([class*=...]) matches every comparison-grid card's container by its
+# "st-key-card_<id>" class prefix, so this doesn't need to repeat per card
+# the way the border-color override below still does. Scoping every rule
+# under that same selector prefix (rather than a bare element selector like
+# `button` or `p`) is deliberate - an earlier version of the progress-bar/
+# button styling used bare selectors and it bled into unrelated widgets
+# elsewhere on the page (a button's own label text turned invisible when a
+# blanket "color: white" rule caught it too).
+DARK_CARD_CSS = """<style>
+[class*="st-key-card_"] {
+    background: linear-gradient(135deg, #0a2e35 0%, #124a52 50%, #1a6570 100%) !important;
+    border: 1px solid rgba(255,255,255,0.25) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 0 24px rgba(20,180,160,0.18) !important;
+    padding: 4px !important;
+}
+[class*="st-key-card_"] [data-testid="stExpander"] p,
+[class*="st-key-card_"] [data-testid="stExpander"] summary {
+    color: #ffffff !important;
+}
+.dark-badge-row { display: flex; gap: 10px; margin: 18px 6px; flex-wrap: wrap; }
+.dark-badge-gold {
+    background: linear-gradient(90deg,#f5c542,#e8a72c); color: #3a2a00;
+    font-size: 13px; font-weight: 700; padding: 8px 16px; border-radius: 20px;
+    display: inline-flex; align-items: center; gap: 7px;
+}
+.dark-badge-glass {
+    background: rgba(255,255,255,0.15); color: #ffffff; font-size: 13px; font-weight: 600;
+    padding: 8px 16px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px;
+}
+.dark-title { color: #ffffff; font-size: 21px; font-weight: 700; margin: 4px 6px 6px; }
+.dark-signals { color: rgba(255,255,255,0.62); font-size: 13px; margin: 0 6px 8px; }
+.dark-price-row {
+    display: flex; gap: 12px; align-items: center; color: #ffffff; font-weight: 700;
+    font-size: 15px; margin: 18px 6px 18px;
+}
+.dark-price-row span.dim { color: rgba(255,255,255,0.4); font-weight: 400; }
+.dark-info-bar {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 12px; padding: 14px 18px; color: #ffffff; font-size: 14px;
+    display: flex; align-items: center; gap: 10px; margin: 0 6px 20px;
+}
+[class*="st-key-card_"] [role="progressbar"] {
+    background: rgba(255,255,255,0.15) !important;
+}
+[class*="st-key-card_"] [role="progressbar"] > div,
+[class*="st-key-card_"] [role="progressbar"] > div > div {
+    background: linear-gradient(90deg,#3b82f6,#22d3ee,#4ade80) !important;
+    box-shadow: 0 0 10px rgba(74,222,128,0.7) !important;
+}
+[class*="st-key-card_"] div.stButton > button,
+[class*="st-key-card_"] div.stDownloadButton > button {
+    padding: 0.4rem 0.9rem !important;
+    font-size: 13.5px !important;
+    border-radius: 10px !important;
+    min-height: 2.2rem !important;
+}
+[class*="st-key-card_"] [data-testid="stExpander"] {
+    margin: 0 6px 14px;
+}
+</style>"""
 
 
 def _rank_score(tiles: dict) -> int:
@@ -349,6 +408,7 @@ with tab_compare:
         # two never disagree.
         scores = [_rank_score(e.tiles()) if e.tiles() else None for e in ranked]
         best_score = scores[0] if scores and scores[0] is not None else None
+        st.markdown(DARK_CARD_CSS, unsafe_allow_html=True)
         compare_cols = st.columns(3)
         for i, entry in enumerate(ranked):
             tiles = entry.tiles()
@@ -356,35 +416,29 @@ with tab_compare:
             # The worst-signal-wins verdict badge (below) is deliberately
             # conservative - reliability is never "green" - so on its own
             # almost every listing reads as the same amber "worth a closer
-            # look", which doesn't tell listings apart. This is what should
-            # actually say "choose this one" vs "maybe not this one": the
-            # whole card is tinted, not just its border - green for the top
-            # score, red for the strictly-lowest score (only when it's
-            # really behind the best, not just tied). Anyone in between
-            # stays the plain default card - correctly reading as "no
-            # strong opinion".
+            # look", which doesn't tell listings apart. The border color is
+            # what should actually say "choose this one" vs "maybe not this
+            # one": gold for the top score, red for the strictly-lowest
+            # score (only when it's really behind the best, not just tied).
+            # Anyone in between keeps the default glass border - correctly
+            # reading as "no strong opinion".
             is_lowest = (
                 i == len(ranked) - 1 and score is not None
                 and best_score is not None and score < best_score
             )
-            card_style = None
+            border_color = None
             if tiles and rank_eligible > 1:
                 if i == 0:
-                    card_style = _CARD_TINTS["green"]
+                    border_color = CARD_BORDER_RECOMMENDED
                 elif is_lowest:
-                    card_style = _CARD_TINTS["red"]
+                    border_color = CARD_BORDER_LOWEST
             with compare_cols[i % 3]:
-                if card_style:
-                    # st.container(border=True) only draws a neutral default
-                    # border with no color/background parameter - key="..."
-                    # tags the wrapper with a matching "st-key-..." CSS class
-                    # (Streamlit's own supported hook for styling one
-                    # specific container), which this scoped <style> block
-                    # then recolors and tints.
+                if border_color:
+                    # DARK_CARD_CSS above styles every card the same way via
+                    # a wildcard selector - this per-card block only needs
+                    # to override the one thing that differs card to card.
                     st.markdown(
-                        f"<style>.st-key-card_{entry.id} {{ "
-                        f"background-color: {card_style['bg']} !important; "
-                        f"border-color: {card_style['accent']} !important; "
+                        f"<style>.st-key-card_{entry.id} {{ border-color: {border_color} !important; "
                         f"border-width: 2px !important; }}</style>",
                         unsafe_allow_html=True,
                     )
@@ -392,48 +446,57 @@ with tab_compare:
                     image_path = _vehicle_image_path(entry.make, entry.model)
                     if image_path:
                         st.image(_load_vehicle_image(str(image_path), *GRID_IMAGE_SIZE), use_container_width=True)
+
+                    badges = []
                     if tiles and rank_eligible > 1:
-                        # Always the same widget (st.badge) regardless of
-                        # rank, just different text/color/icon - using a
-                        # taller st.success/st.error banner only for the
-                        # extremes made those two cards visibly taller than
-                        # the rest of the grid; the card tint above is what
-                        # signals "choose this" / "avoid this" now, so the
-                        # badge itself can stay uniform.
                         if i == 0:
-                            st.badge("Recommended - best pick", icon=":material/military_tech:", color="green")
+                            badges.append('<span class="dark-badge-gold">🏆 Recommended - best pick</span>')
                         elif is_lowest:
-                            st.badge("Lowest-ranked - use caution", icon=":material/thumb_down:", color="red")
+                            badges.append('<span class="dark-badge-glass">⚠️ Lowest-ranked - use caution</span>')
                         else:
-                            st.badge(f"#{i + 1} of your evaluated listings", icon=":material/star:", color="blue")
+                            badges.append(f'<span class="dark-badge-glass">☆ #{i + 1} of your evaluated listings</span>')
                     if tiles:
-                        verdict_badge = {
-                            "red": ("Needs caution", ":material/warning:", "red"),
-                            "amber": ("Worth a closer look", ":material/visibility:", "orange"),
-                            "green": ("Looks solid", ":material/thumb_up:", "green"),
+                        verdict_text = {
+                            "red": "⚠️ Needs caution", "amber": "👁️ Worth a closer look", "green": "👍 Looks solid",
                         }[_overall_color(tiles)]
-                        st.badge(verdict_badge[0], icon=verdict_badge[1], color=verdict_badge[2])
+                        badges.append(f'<span class="dark-badge-glass">{verdict_text}</span>')
+                    if badges:
+                        st.markdown(f'<div class="dark-badge-row">{"".join(badges)}</div>', unsafe_allow_html=True)
+
+                    st.markdown(
+                        f'<div class="dark-title">{html.escape(f"{entry.year} {entry.make} {entry.model}")}</div>',
+                        unsafe_allow_html=True,
+                    )
                     if score is not None:
+                        st.markdown(
+                            f'<p class="dark-signals">{score}/{MAX_RANK_SCORE} signals positive</p>',
+                            unsafe_allow_html=True,
+                        )
                         # A same-width bar per card is what actually makes
                         # "which one's better" jump out at a glance across
                         # the grid - reading four individual tile colors per
                         # card and comparing them mentally, card to card,
                         # doesn't.
-                        st.progress(
-                            score / MAX_RANK_SCORE,
-                            text=f"{score}/{MAX_RANK_SCORE} signals positive",
-                        )
-                    st.markdown(f"**{entry.year} {entry.make} {entry.model}**")
-                    # st.caption's muted secondary-gray color was hard to
-                    # read against the card's own colored tint - st.markdown
-                    # renders the same way st.caption already did (both are
-                    # Streamlit's markdown renderer; no unsafe_allow_html
-                    # here, so entry.symptom can't inject raw HTML either
-                    # way), just at normal-contrast body-text size/color.
+                        st.progress(score / MAX_RANK_SCORE)
+
                     st.markdown(
-                        f"{entry.symptom} · ${entry.asking_price:,.0f} / {entry.odometer:,} mi · "
-                        f"{_format_pacific(entry.created_at)}"
+                        '<div class="dark-price-row">'
+                        f"<span>${entry.asking_price:,.0f}</span><span class=\"dim\">&middot;</span>"
+                        f"<span>{entry.odometer:,} mi</span><span class=\"dim\">&middot;</span>"
+                        f"<span>{html.escape(_format_pacific(entry.created_at))}</span>"
+                        "</div>",
+                        unsafe_allow_html=True,
                     )
+                    # entry.symptom is free-text user input, unlike every
+                    # other value rendered as raw HTML on this card (all of
+                    # which come from fixed templates or curated listing
+                    # data) - html.escape() here is load-bearing, not
+                    # decorative.
+                    st.markdown(
+                        f'<div class="dark-info-bar"><span>ⓘ</span> {html.escape(entry.symptom)}</div>',
+                        unsafe_allow_html=True,
+                    )
+
                     if tiles:
                         st.markdown(_signal_squares_html(tiles), unsafe_allow_html=True)
                     else:
@@ -455,20 +518,23 @@ with tab_compare:
                         f"${entry.asking_price:,.0f} - {entry.odometer:,} mi - {entry.symptom}",
                         tiles, entry.full_answer,
                     )
-                    st.download_button(
-                        "Download PDF", data=pdf_bytes,
-                        file_name=f"carscout_{entry.make}_{entry.model}_{entry.year}.pdf".replace(" ", "_"),
-                        mime="application/pdf", key=f"pdf_{entry.id}",
-                        type="primary", icon=":material/download:", use_container_width=True,
-                    )
-                    if st.button(
-                        "Use this search", key=f"reuse_{entry.id}",
-                        icon=":material/replay:", use_container_width=True,
-                    ):
-                        label = VIN_LABEL_BY_MAKE_MODEL.get((entry.make, entry.model), VIN_LABELS[0])
-                        st.session_state["form_vin_label"] = label
-                        st.session_state["form_symptom"] = entry.symptom
-                        st.rerun()
+                    btn_col1, btn_col2 = st.columns(2)
+                    with btn_col1:
+                        st.download_button(
+                            "Download PDF", data=pdf_bytes,
+                            file_name=f"carscout_{entry.make}_{entry.model}_{entry.year}.pdf".replace(" ", "_"),
+                            mime="application/pdf", key=f"pdf_{entry.id}",
+                            type="primary", icon=":material/download:", use_container_width=True,
+                        )
+                    with btn_col2:
+                        if st.button(
+                            "Use this search", key=f"reuse_{entry.id}",
+                            icon=":material/replay:", use_container_width=True,
+                        ):
+                            label = VIN_LABEL_BY_MAKE_MODEL.get((entry.make, entry.model), VIN_LABELS[0])
+                            st.session_state["form_vin_label"] = label
+                            st.session_state["form_symptom"] = entry.symptom
+                            st.rerun()
 
 with tab_run:
     selected_label = st.selectbox(
