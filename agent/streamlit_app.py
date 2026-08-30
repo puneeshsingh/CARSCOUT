@@ -538,6 +538,10 @@ def _render_comparison_chat_panel(ranked_entries, user_name, rank_labels):
                 # blank) - escape display-only, same as everywhere else
                 # this pattern shows up; the stored value stays unescaped.
                 st.markdown(_escape_for_markdown(msg["content"]))
+                if msg.get("sources"):
+                    st.caption(
+                        "Sources: " + ", ".join(f"[{s['title']}]({s['url']})" for s in msg["sources"])
+                    )
 
         if question := st.chat_input("e.g. Which one has the best safety rating?"):
             # Same moderation gate as the main due-diligence flow (fail
@@ -555,40 +559,92 @@ def _render_comparison_chat_panel(ranked_entries, user_name, rank_labels):
                 # this same script pass, before this question existed - so
                 # the user's own bubble has to be drawn explicitly here too,
                 # or it wouldn't appear until the rerun below, making the
-                # streamed reply below look like it came from nowhere.
+                # reply below look like it came from nowhere.
                 with st.chat_message("user"):
                     st.markdown(_escape_for_markdown(question))
-                with st.chat_message("assistant"):
-                    try:
-                        # Escaping has to happen per-chunk, live, not once
-                        # on the full answer afterward - by the time
-                        # st.write_stream() returns, the (unescaped) text
-                        # has already been rendered chunk by chunk, so an
-                        # answer with 2+ dollar amounts would flash the same
-                        # "text between $ signs goes blank" bug while
-                        # streaming even if the final settled text looked
-                        # fine. raw_chunks keeps the actual unescaped text
-                        # for storage - escaping is display-only and must
-                        # never leak into what's saved (same rule as
-                        # _escape_for_markdown's own docstring).
-                        raw_chunks = []
 
-                        def _escaped_stream():
-                            for chunk in comparison_chat.stream_comparison_answer(
-                                ranked_entries, question, history_before, rank_labels
-                            ):
-                                raw_chunks.append(chunk)
-                                yield _escape_for_markdown(chunk)
+                # A dedicated router decides BEFORE any answer is generated
+                # whether this needs web search - never left to the answer-
+                # writing call's own judgment (see comparison_chat.py's
+                # classify_scope docstring). "error" is treated the same as
+                # "in_scope": the safe default is answering from already-
+                # verified saved data, never silently reaching out to the
+                # web because a classifier call happened to fail.
+                with st.spinner("Thinking..."):
+                    scope = comparison_chat.classify_scope(question, ranked_entries)
 
-                        st.write_stream(_escaped_stream())
-                        full_answer = "".join(raw_chunks)
-                        st.session_state[chat_key].append({"role": "assistant", "content": full_answer})
-                    except Exception:
-                        st.error("Something went wrong answering that - please try again.")
-                        st.session_state[chat_key].append({
-                            "role": "assistant",
-                            "content": "Something went wrong answering that - please try again.",
-                        })
+                if scope["status"] == "needs_web":
+                    with st.spinner("Searching the web..."):
+                        web_result = comparison_chat.answer_with_web_search(
+                            ranked_entries, question, history_before, rank_labels
+                        )
+                else:
+                    web_result = {"status": "no_results"}
+
+                if web_result["status"] == "ok":
+                    # Non-streamed and moderation-checked before display -
+                    # unlike the grounded path below, this answer is built
+                    # from untrusted web content, so it can't be revealed
+                    # live token-by-token; it has to be fully generated and
+                    # pass the same fail-closed moderation gate used
+                    # everywhere else in this app before the user sees any
+                    # of it (see guards.check_moderation).
+                    output_check = guards.check_moderation(web_result["answer"])
+                    if output_check["status"] != "ok":
+                        web_result = {"status": "error"}
+
+                if web_result["status"] == "ok":
+                    with st.chat_message("assistant"):
+                        st.markdown(_escape_for_markdown(web_result["answer"]))
+                        if web_result["sources"]:
+                            st.caption(
+                                "Sources: "
+                                + ", ".join(f"[{s['title']}]({s['url']})" for s in web_result["sources"])
+                            )
+                    st.session_state[chat_key].append({
+                        "role": "assistant",
+                        "content": web_result["answer"],
+                        "sources": web_result["sources"],
+                    })
+                else:
+                    # Falls through to the normal grounded, streamed answer
+                    # for "no_results" (Tavily unconfigured/failed/all
+                    # results screened out) and "error" alike - a web-search
+                    # miss should never dead-end the conversation when the
+                    # saved listing data might still answer it, or at least
+                    # say honestly that it doesn't.
+                    with st.chat_message("assistant"):
+                        try:
+                            # Escaping has to happen per-chunk, live, not
+                            # once on the full answer afterward - by the
+                            # time st.write_stream() returns, the
+                            # (unescaped) text has already been rendered
+                            # chunk by chunk, so an answer with 2+ dollar
+                            # amounts would flash the same "text between $
+                            # signs goes blank" bug while streaming even if
+                            # the final settled text looked fine.
+                            # raw_chunks keeps the actual unescaped text for
+                            # storage - escaping is display-only and must
+                            # never leak into what's saved (same rule as
+                            # _escape_for_markdown's own docstring).
+                            raw_chunks = []
+
+                            def _escaped_stream():
+                                for chunk in comparison_chat.stream_comparison_answer(
+                                    ranked_entries, question, history_before, rank_labels
+                                ):
+                                    raw_chunks.append(chunk)
+                                    yield _escape_for_markdown(chunk)
+
+                            st.write_stream(_escaped_stream())
+                            full_answer = "".join(raw_chunks)
+                            st.session_state[chat_key].append({"role": "assistant", "content": full_answer})
+                        except Exception:
+                            st.error("Something went wrong answering that - please try again.")
+                            st.session_state[chat_key].append({
+                                "role": "assistant",
+                                "content": "Something went wrong answering that - please try again.",
+                            })
                 st.rerun()
 
 

@@ -131,6 +131,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "sqlalchemy" },
     { name = "streamlit" },
+    { name = "tavily-python" },
     { name = "tiktoken" },
 ]
 
@@ -153,6 +154,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
     { name = "streamlit", specifier = ">=1.61.1" },
+    { name = "tavily-python", specifier = ">=0.8.0" },
     { name = "tiktoken", specifier = ">=0.13.0" },
 ]
 
@@ -2716,6 +2718,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ef/52/9ba0f43b686e7f3ddfeaa78ac3af750292662284b3661e91ad5494f21dbc/structlog-25.5.0.tar.gz", hash = "sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98", size = 1460830, upload-time = "2025-10-27T08:28:23.028Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/45/a132b9074aa18e799b891b91ad72133c98d8042c70f6240e4c5f9dabee2f/structlog-25.5.0-py3-none-any.whl", hash = "sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f", size = 72510, upload-time = "2025-10-27T08:28:21.535Z" },
+]
+
+[[package]]
+name = "tavily-python"
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "requests" },
+    { name = "tiktoken" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/92/c2/dd46d7e44093e710768f0584a9ad290148a215bd40d3f86d27e94a3e6203/tavily_python-0.8.0.tar.gz", hash = "sha256:e9e440df828a70ea9c4390f27778dbdc051159406c9c903bad1e6d8dc7df2fc4", size = 31192, upload-time = "2026-08-24T16:16:13.767Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/7b/4d125cd672540a075e20fc5131f039ba93d42d91cfcbd4348e99ad4eab77/tavily_python-0.8.0-py3-none-any.whl", hash = "sha256:c5aaea1dab5daad0e846e8603e54c6b9088cb6da8ce0d474f2114c6940941409", size = 22098, upload-time = "2026-08-24T16:16:12.784Z" },
 ]
 
 [[package]]
