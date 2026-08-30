@@ -71,6 +71,15 @@ class RecentSearch(Base):
     # past search's red/amber/green summary without re-running the agent.
     # Nullable for rows saved before this existed.
     tiles_json = Column(String, nullable=True)
+    # JSON-encoded list of every question ever asked about this listing -
+    # [{"symptom", "full_answer", "tiles", "created_at"}, ...] in
+    # chronological order. symptom/full_answer/tiles_json/created_at above
+    # always mirror the LATEST entry (comparison-grid card display, ranking,
+    # and the info-bar all read those directly, unchanged) - this column
+    # exists only so "View full report"/the PDF can show every question's
+    # answer instead of just the most recent one silently overwriting the
+    # last. Nullable for rows saved before this existed.
+    qa_history_json = Column(String, nullable=True)
 
     def tiles(self) -> dict:
         if not self.tiles_json:
@@ -79,6 +88,27 @@ class RecentSearch(Base):
             return json.loads(self.tiles_json)
         except (json.JSONDecodeError, TypeError):
             return {}
+
+    def qa_history(self) -> list[dict]:
+        """Every question asked about this listing, oldest first. Falls
+        back to a single-entry history built from the latest columns for
+        rows saved before this existed, so old rows still show their one
+        real answer instead of an empty report."""
+        if self.qa_history_json:
+            try:
+                history = json.loads(self.qa_history_json)
+                if history:
+                    return history
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return [
+            {
+                "symptom": self.symptom,
+                "full_answer": self.full_answer,
+                "tiles": self.tiles(),
+                "created_at": self.created_at.isoformat() if self.created_at else None,
+            }
+        ]
 
 
 def _database_url() -> str:
@@ -118,6 +148,9 @@ def init_db(engine: Engine) -> None:
     if "tiles_json" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE recent_searches ADD COLUMN tiles_json VARCHAR"))
+    if "qa_history_json" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE recent_searches ADD COLUMN qa_history_json VARCHAR"))
 
 
 def save_search(
@@ -151,16 +184,30 @@ def save_search(
         ).first()
 
         tiles_json = json.dumps(tiles) if tiles else None
+        now = datetime.now(timezone.utc)
+        new_qa_entry = {
+            "symptom": symptom,
+            "full_answer": final_answer,
+            "tiles": tiles or {},
+            "created_at": now.isoformat(),
+        }
 
         if existing:
-            existing.created_at = datetime.now(timezone.utc)
+            # Every prior question asked about this listing is kept (see
+            # qa_history_json docstring on the model) - only the "latest"
+            # columns get overwritten, same as before, so the card display/
+            # ranking/info-bar behavior is unchanged.
+            history = existing.qa_history()
+            history.append(new_qa_entry)
+            existing.created_at = now
             existing.symptom = symptom
             existing.full_answer = final_answer
             existing.tiles_json = tiles_json
+            existing.qa_history_json = json.dumps(history)
         else:
             session.add(
                 RecentSearch(
-                    created_at=datetime.now(timezone.utc),
+                    created_at=now,
                     user_name=user_name,
                     make=make,
                     model=model,
@@ -171,6 +218,7 @@ def save_search(
                     symptom=symptom,
                     full_answer=final_answer,
                     tiles_json=tiles_json,
+                    qa_history_json=json.dumps([new_qa_entry]),
                 )
             )
         session.commit()

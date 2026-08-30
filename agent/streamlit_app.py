@@ -11,7 +11,7 @@ import base64
 import html
 import re
 import sys
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -155,14 +155,14 @@ DARK_CARD_CSS = """<style>
     box-shadow: 0 0 24px rgba(20,180,160,0.18) !important;
     padding: 4px !important;
 }
-[class*="st-key-card_"] [data-testid="stExpander"] p,
-[class*="st-key-card_"] [data-testid="stExpander"] span,
-[class*="st-key-card_"] [data-testid="stExpander"] summary {
-    /* st.text()'s preview line renders as a bare <span> with Streamlit's
-       default near-black body color (rgb(49,51,63)), not covered by the
-       <p>/<summary> rule below it - confirmed via computed style inspection
-       that every other element in here (the <p>/<strong> tags from
-       st.markdown()) was already white, only this one span wasn't. */
+[class*="st-key-card_"] [data-testid="stExpander"] * {
+    /* Wildcard, not a tag-by-tag list (p/span/summary) - the full report's
+       markdown can render numbered lists (<ol>/<li>) for recall campaigns,
+       and those weren't covered by the narrower rule, so they inherited
+       Streamlit's default near-black body color and were invisible against
+       the dark card. Same fix pattern already used for the chat panel's
+       message content, applied here for the same reason: enumerating tags
+       one at a time keeps missing the next markdown element type. */
     color: #ffffff !important;
 }
 .dark-badge-row { display: flex; gap: 10px; margin: 18px 18px; flex-wrap: wrap; }
@@ -279,6 +279,25 @@ def _report_header(year, make, vehicle_model, asking_price, odometer, symptom) -
         f"# Due-diligence report: {year} {make} {vehicle_model}\n\n"
         f"Asking price: ${asking_price:,.0f} | Odometer: {odometer:,} mi | Symptom: {symptom}\n\n---\n\n"
     )
+
+
+def _combined_report_markdown(qa_history: list[dict]) -> str:
+    """Every question ever asked about a listing, most recent first - a
+    second (or third...) question about the same curated VIN used to
+    silently overwrite the previous run's full report (only the
+    comparison-grid CARD is meant to be one-per-listing; the underlying
+    answers were never meant to be thrown away). Single-question listings
+    (the common case) render exactly as before - no extra heading, so this
+    is a no-op for every pre-existing saved search."""
+    if len(qa_history) <= 1:
+        return qa_history[0]["full_answer"] if qa_history else ""
+    sections = []
+    for entry in reversed(qa_history):
+        created_at = entry.get("created_at")
+        when = _format_pacific(datetime.fromisoformat(created_at)) if created_at else ""
+        heading = f"### Q: {entry['symptom']}" + (f"  \n*{when}*" if when else "")
+        sections.append(f"{heading}\n\n{entry['full_answer']}")
+    return "\n\n---\n\n".join(sections)
 
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -806,20 +825,24 @@ with tab_compare:
                         # Saved before tile classification existed - no
                         # per-signal colors to show, just the plain text.
                         st.caption("No at-a-glance summary saved for this older search.")
+                    qa_history = entry.qa_history()
+                    combined_report = _combined_report_markdown(qa_history)
                     with st.expander("View full report"):
                         # st.text (not st.write/st.markdown): never
                         # interprets markdown, so a preview built from any
                         # saved row (old or new format) always renders the
                         # same way, card to card.
                         st.text(memory_store.build_preview(entry.full_answer))
-                        st.markdown(_escape_for_markdown(entry.full_answer))
+                        if len(qa_history) > 1:
+                            st.caption(f"{len(qa_history)} questions asked about this listing.")
+                        st.markdown(_escape_for_markdown(combined_report))
                     # build_report_pdf() falls back to "No data" per signal
                     # when tiles is {} (older, pre-tile-classification rows),
                     # so PDF download works for every saved search either way.
                     pdf_bytes = report_pdf.build_report_pdf(
                         f"{entry.year} {entry.make} {entry.model}",
                         f"${entry.asking_price:,.0f} - {entry.odometer:,} mi - {entry.symptom}",
-                        tiles, entry.full_answer,
+                        tiles, combined_report,
                     )
                     btn_col1, btn_col2 = st.columns(2)
                     with btn_col1:
