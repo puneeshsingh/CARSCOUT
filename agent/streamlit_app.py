@@ -500,13 +500,19 @@ CHAT_WIDGET_CSS = """<style>
 </style>"""
 
 
-def _render_comparison_chat_panel(ranked_entries, user_name):
+def _render_comparison_chat_panel(ranked_entries, user_name, rank_labels):
     """Chat over the user's own evaluated listings - grounded in the same
     saved tiles/summaries the comparison grid renders, not a second live-
     tool-calling agent (see comparison_chat.py). Chat history is keyed by
     user_name (session_state, not persisted to the DB) so switching the
     name in the sidebar doesn't show one person's chat under another's
-    searches - the same scoping the searches themselves already use."""
+    searches - the same scoping the searches themselves already use.
+
+    rank_labels: {entry.id: "Recommended - best pick" | "#N of your
+    evaluated listings" | "Lowest-ranked - consider carefully"} - the same
+    dict the card badges above are built from, so the chat can answer
+    "why did you recommend X" using the exact ranking the user is already
+    looking at, instead of having no rank information at all."""
     with st.container(key="chat_panel"):
         # The toggle button itself (outside this panel) already relabels to
         # "✕ Close" while the panel is open - an in-panel close button here
@@ -569,7 +575,7 @@ def _render_comparison_chat_panel(ranked_entries, user_name):
 
                         def _escaped_stream():
                             for chunk in comparison_chat.stream_comparison_answer(
-                                ranked_entries, question, history_before
+                                ranked_entries, question, history_before, rank_labels
                             ):
                                 raw_chunks.append(chunk)
                                 yield _escape_for_markdown(chunk)
@@ -634,13 +640,30 @@ with tab_compare:
             for i in range(len(ranked))
         ]
         border_overrides = []
+        # Single source of truth for each listing's rank label - used both
+        # for the card badge below and passed into the comparison chat, so
+        # the chat can't ever describe a listing's rank differently than
+        # the badge the user is looking at. Before this, the chat had no
+        # rank/recommendation info at all: it only ever saw price/mileage/
+        # tiles per listing (see comparison_chat.py's _format_listing()),
+        # so asking it "why did you recommend X" got "I didn't recommend
+        # it" - technically accurate given what it could see, but flatly
+        # contradicting the gold "Recommended" badge right next to the chat
+        # button. This wasn't a tone/persona problem, it was a missing-data
+        # one - a more confident-sounding prompt would've just made a wrong
+        # answer sound more sure of itself.
+        rank_labels: dict[int, str] = {}
         for i, entry in enumerate(ranked):
             if not (entry.tiles() and rank_eligible > 1):
                 continue
             if i == 0:
+                rank_labels[entry.id] = "Recommended - best pick"
                 border_overrides.append((entry.id, CARD_BORDER_RECOMMENDED))
             elif is_lowest_flags[i]:
+                rank_labels[entry.id] = "Lowest-ranked - consider carefully"
                 border_overrides.append((entry.id, CARD_BORDER_LOWEST))
+            else:
+                rank_labels[entry.id] = f"#{i + 1} of your evaluated listings"
         # One combined <style> block for every card that needs a border
         # override, injected once, outside the column loop entirely - an
         # earlier version injected one st.markdown() per qualifying card,
@@ -670,13 +693,10 @@ with tab_compare:
                         st.image(_load_vehicle_image(str(image_path), *GRID_IMAGE_SIZE), use_container_width=True)
 
                     badges = []
-                    if tiles and rank_eligible > 1:
-                        if i == 0:
-                            badges.append('<span class="dark-badge-gold">🏆 Recommended - best pick</span>')
-                        elif is_lowest:
-                            badges.append('<span class="dark-badge-glass">⚠️ Lowest-ranked - use caution</span>')
-                        else:
-                            badges.append(f'<span class="dark-badge-glass">☆ #{i + 1} of your evaluated listings</span>')
+                    if entry.id in rank_labels:
+                        badge_class = "dark-badge-gold" if i == 0 else "dark-badge-glass"
+                        badge_icon = "🏆" if i == 0 else ("⚠️" if is_lowest else "☆")
+                        badges.append(f'<span class="{badge_class}">{badge_icon} {rank_labels[entry.id]}</span>')
                     if tiles:
                         verdict_text = {
                             "red": "⚠️ Needs caution", "amber": "👁️ Worth a closer look", "green": "👍 Looks solid",
@@ -775,7 +795,7 @@ with tab_compare:
             st.session_state["chat_panel_open"] = not st.session_state["chat_panel_open"]
             st.rerun()
         if st.session_state["chat_panel_open"]:
-            _render_comparison_chat_panel(ranked, user_name)
+            _render_comparison_chat_panel(ranked, user_name, rank_labels)
 
 with tab_run:
     selected_label = st.selectbox(
