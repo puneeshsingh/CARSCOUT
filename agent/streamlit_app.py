@@ -198,7 +198,7 @@ DEFAULT_SYMPTOM = "Is engine stalling a known issue for this vehicle?"
 # Form fields are session_state-backed (rather than plain `value=` literals)
 # so a "Use this search" click in the Recent Searches sidebar can populate
 # them before the form widgets are created below.
-st.session_state.setdefault("form_vin_label", VIN_LABELS[0])
+st.session_state.setdefault("form_vin_label", None)
 st.session_state.setdefault("form_symptom", DEFAULT_SYMPTOM)
 st.session_state.setdefault("user_name", "")
 
@@ -231,44 +231,141 @@ st.caption(
 
 tab_run, tab_compare = st.tabs(["Run a new check", "Your evaluated listings"])
 
-with tab_run:
-    col_icon, col_form = st.columns([2, 5])
-    vehicle_index = VIN_LABELS.index(st.session_state["form_vin_label"])
+# tab_compare renders BEFORE tab_run in the script (their with-block order
+# doesn't affect which tab appears first in the UI - that's set by the
+# order passed to st.tabs() above). tab_run's body calls st.stop() when no
+# listing is selected yet, which halts the *entire* script from that point
+# on - so tab_compare has to already be fully rendered before that can
+# happen, or it would never show anything.
+with tab_compare:
+    recent = memory_store.get_recent_searches(memory_engine, user_name=user_name)
+    if not user_name:
+        st.info("Enter your name in the sidebar to save and compare your evaluated listings here.")
+    elif not recent:
+        st.write("No searches yet - run a check in the other tab first.")
+    else:
+        # Best-first, not just most-recent-first, so the comparison actually
+        # ranks the listings - a green-heavy report leads, red-heavy trails.
+        # Entries saved before tile classification existed (score -1) always
+        # sort last, since there's nothing to rank them on.
+        ranked = sorted(
+            recent,
+            key=lambda e: _rank_score(e.tiles()) if e.tiles() else -1,
+            reverse=True,
+        )
+        rank_eligible = sum(1 for e in ranked if e.tiles())
+        st.caption(
+            f"{len(recent)} evaluated listing(s) for {user_name}, best overall result first."
+        )
+        compare_cols = st.columns(3)
+        for i, entry in enumerate(ranked):
+            tiles = entry.tiles()
+            with compare_cols[i % 3]:
+                with st.container(border=True):
+                    image_path = _vehicle_image_path(entry.make, entry.model)
+                    if image_path:
+                        st.image(_load_vehicle_image(str(image_path), *GRID_IMAGE_SIZE), use_container_width=True)
+                    if tiles and rank_eligible > 1:
+                        if i == 0:
+                            st.badge("Best of your evaluated listings", icon=":material/military_tech:", color="green")
+                        else:
+                            st.badge(f"#{i + 1} of your evaluated listings", icon=":material/star:", color="blue")
+                    if tiles:
+                        verdict_badge = {
+                            "red": ("Needs caution", ":material/warning:", "red"),
+                            "amber": ("Worth a closer look", ":material/visibility:", "orange"),
+                            "green": ("Looks solid", ":material/thumb_up:", "green"),
+                        }[_overall_color(tiles)]
+                        st.badge(verdict_badge[0], icon=verdict_badge[1], color=verdict_badge[2])
+                    st.markdown(f"**{entry.year} {entry.make} {entry.model}**")
+                    st.caption(
+                        f"{entry.symptom} · ${entry.asking_price:,.0f} / {entry.odometer:,} mi · "
+                        f"{_format_pacific(entry.created_at)}"
+                    )
+                    if tiles:
+                        for signal, title in TILE_TITLES.items():
+                            tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
+                            headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
+                            TILE_RENDERERS[tile["color"]](f"{title}: {headline}", icon=TILE_ICONS[signal])
+                    else:
+                        # Saved before tile classification existed - no
+                        # per-signal colors to show, just the plain text.
+                        st.caption("No at-a-glance summary saved for this older search.")
+                    with st.expander("View full report"):
+                        # st.text (not st.write/st.markdown): never
+                        # interprets markdown, so a preview built from any
+                        # saved row (old or new format) always renders the
+                        # same way, card to card.
+                        st.text(memory_store.build_preview(entry.full_answer))
+                        st.markdown(_escape_for_markdown(entry.full_answer))
+                    # build_report_pdf() falls back to "No data" per signal
+                    # when tiles is {} (older, pre-tile-classification rows),
+                    # so PDF download works for every saved search either way.
+                    pdf_bytes = report_pdf.build_report_pdf(
+                        f"{entry.year} {entry.make} {entry.model}",
+                        f"${entry.asking_price:,.0f} - {entry.odometer:,} mi - {entry.symptom}",
+                        tiles, entry.full_answer,
+                    )
+                    st.download_button(
+                        "Download PDF", data=pdf_bytes,
+                        file_name=f"carscout_{entry.make}_{entry.model}_{entry.year}.pdf".replace(" ", "_"),
+                        mime="application/pdf", key=f"pdf_{entry.id}",
+                        type="primary", icon=":material/download:", use_container_width=True,
+                    )
+                    if st.button(
+                        "Use this search", key=f"reuse_{entry.id}",
+                        icon=":material/replay:", use_container_width=True,
+                    ):
+                        label = VIN_LABEL_BY_MAKE_MODEL.get((entry.make, entry.model), VIN_LABELS[0])
+                        st.session_state["form_vin_label"] = label
+                        st.session_state["form_symptom"] = entry.symptom
+                        st.rerun()
 
-    with col_icon:
-        _preview_listing = VIN_DEMO_LISTINGS[vehicle_index]
-        image_path = _vehicle_image_path(_preview_listing["make"], _preview_listing["model"])
-        if image_path:
-            st.image(_load_vehicle_image(str(image_path), *FEATURED_IMAGE_SIZE))
-        else:
-            st.markdown(_car_icon_svg(VEHICLE_ICON_COLORS[vehicle_index]), unsafe_allow_html=True)
-    with col_form:
-        selected_label = st.selectbox("Choose a listing (VIN)", VIN_LABELS, key="form_vin_label")
-        listing = LISTING_BY_VIN_LABEL[selected_label]
+with tab_run:
+    selected_label = st.selectbox(
+        "Choose a listing (VIN)", VIN_LABELS, index=None,
+        placeholder="Select a vehicle listing to preview...", key="form_vin_label",
+    )
+
+    if selected_label is None:
+        st.info("Choose a listing above to preview it and run a due-diligence check.")
+        st.stop()
+
+    listing = LISTING_BY_VIN_LABEL[selected_label]
+    vehicle_index = VIN_LABELS.index(selected_label)
 
     make, vehicle_model, year = listing["make"], listing["model"], listing["year"]
     asking_price, odometer, condition = listing["price"], listing["odometer"], listing["condition"]
     condition_text = condition or "not stated"
 
-    with st.spinner("Decoding VIN..."):
-        decoded = vin_decode.decode_vin(listing["vin"])
-    # Two genuinely different sources, kept visually distinct so neither
-    # implies it vouches for the other's data: NHTSA's vPIC API only ever
-    # decodes the vehicle itself (make/model/year) from the VIN - it has no
-    # idea what a listing is asking for it. Price/mileage/condition always
-    # come from the curated listing data, whether or not the live decode
-    # call succeeds.
-    if decoded["status"] == "ok":
-        st.badge(
-            f"VIN decoded live via NHTSA: {decoded['year']} {decoded['make']} {decoded['model']}",
-            icon=":material/verified:", color="green",
-        )
-    else:
-        st.badge("NHTSA decode unavailable - showing the listing's own vehicle data", icon=":material/error:", color="gray")
-    listing_col1, listing_col2, listing_col3 = st.columns(3)
-    listing_col1.metric("Asking price", f"${asking_price:,.0f}")
-    listing_col2.metric("Odometer", f"{odometer:,} mi")
-    listing_col3.metric("Condition", condition_text.title())
+    col_icon, col_form = st.columns([2, 5])
+    with col_icon:
+        image_path = _vehicle_image_path(make, vehicle_model)
+        if image_path:
+            st.image(_load_vehicle_image(str(image_path), *FEATURED_IMAGE_SIZE))
+        else:
+            st.markdown(_car_icon_svg(VEHICLE_ICON_COLORS[vehicle_index]), unsafe_allow_html=True)
+
+    with col_form:
+        with st.spinner("Decoding VIN..."):
+            decoded = vin_decode.decode_vin(listing["vin"])
+        # Two genuinely different sources, kept visually distinct so
+        # neither implies it vouches for the other's data: NHTSA's vPIC
+        # API only ever decodes the vehicle itself (make/model/year) from
+        # the VIN - it has no idea what a listing is asking for it. Price/
+        # mileage/condition always come from the curated listing data,
+        # whether or not the live decode call succeeds.
+        if decoded["status"] == "ok":
+            st.badge(
+                f"VIN decoded live via NHTSA: {decoded['year']} {decoded['make']} {decoded['model']}",
+                icon=":material/verified:", color="green",
+            )
+        else:
+            st.badge("NHTSA decode unavailable - showing the listing's own vehicle data", icon=":material/error:", color="gray")
+        listing_col1, listing_col2, listing_col3 = st.columns(3)
+        listing_col1.metric("Asking price", f"${asking_price:,.0f}")
+        listing_col2.metric("Odometer", f"{odometer:,} mi")
+        listing_col3.metric("Condition", condition_text.title())
 
     symptom = st.text_input("Symptom / question", key="form_symptom")
 
@@ -389,87 +486,3 @@ with tab_run:
                     st.code(f"{step['tool']}({step['args']})", language="python")
                 else:
                     st.write(step["text"])
-
-with tab_compare:
-    recent = memory_store.get_recent_searches(memory_engine, user_name=user_name)
-    if not user_name:
-        st.info("Enter your name in the sidebar to save and compare your evaluated listings here.")
-    elif not recent:
-        st.write("No searches yet - run a check in the other tab first.")
-    else:
-        # Best-first, not just most-recent-first, so the comparison actually
-        # ranks the listings - a green-heavy report leads, red-heavy trails.
-        # Entries saved before tile classification existed (score -1) always
-        # sort last, since there's nothing to rank them on.
-        ranked = sorted(
-            recent,
-            key=lambda e: _rank_score(e.tiles()) if e.tiles() else -1,
-            reverse=True,
-        )
-        rank_eligible = sum(1 for e in ranked if e.tiles())
-        st.caption(
-            f"{len(recent)} evaluated listing(s) for {user_name}, best overall result first."
-        )
-        compare_cols = st.columns(3)
-        for i, entry in enumerate(ranked):
-            tiles = entry.tiles()
-            with compare_cols[i % 3]:
-                with st.container(border=True):
-                    image_path = _vehicle_image_path(entry.make, entry.model)
-                    if image_path:
-                        st.image(_load_vehicle_image(str(image_path), *GRID_IMAGE_SIZE), use_container_width=True)
-                    if tiles and rank_eligible > 1:
-                        if i == 0:
-                            st.badge("Best of your evaluated listings", icon=":material/military_tech:", color="green")
-                        else:
-                            st.badge(f"#{i + 1} of your evaluated listings", icon=":material/star:", color="blue")
-                    if tiles:
-                        verdict_badge = {
-                            "red": ("Needs caution", ":material/warning:", "red"),
-                            "amber": ("Worth a closer look", ":material/visibility:", "orange"),
-                            "green": ("Looks solid", ":material/thumb_up:", "green"),
-                        }[_overall_color(tiles)]
-                        st.badge(verdict_badge[0], icon=verdict_badge[1], color=verdict_badge[2])
-                    st.markdown(f"**{entry.year} {entry.make} {entry.model}**")
-                    st.caption(
-                        f"{entry.symptom} · ${entry.asking_price:,.0f} / {entry.odometer:,} mi · "
-                        f"{_format_pacific(entry.created_at)}"
-                    )
-                    if tiles:
-                        for signal, title in TILE_TITLES.items():
-                            tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
-                            headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
-                            TILE_RENDERERS[tile["color"]](f"{title}: {headline}", icon=TILE_ICONS[signal])
-                    else:
-                        # Saved before tile classification existed - no
-                        # per-signal colors to show, just the plain text.
-                        st.caption("No at-a-glance summary saved for this older search.")
-                    with st.expander("View full report"):
-                        # st.text (not st.write/st.markdown): never
-                        # interprets markdown, so a preview built from any
-                        # saved row (old or new format) always renders the
-                        # same way, card to card.
-                        st.text(memory_store.build_preview(entry.full_answer))
-                        st.markdown(_escape_for_markdown(entry.full_answer))
-                    # build_report_pdf() falls back to "No data" per signal
-                    # when tiles is {} (older, pre-tile-classification rows),
-                    # so PDF download works for every saved search either way.
-                    pdf_bytes = report_pdf.build_report_pdf(
-                        f"{entry.year} {entry.make} {entry.model}",
-                        f"${entry.asking_price:,.0f} - {entry.odometer:,} mi - {entry.symptom}",
-                        tiles, entry.full_answer,
-                    )
-                    st.download_button(
-                        "Download PDF", data=pdf_bytes,
-                        file_name=f"carscout_{entry.make}_{entry.model}_{entry.year}.pdf".replace(" ", "_"),
-                        mime="application/pdf", key=f"pdf_{entry.id}",
-                        type="primary", icon=":material/download:", use_container_width=True,
-                    )
-                    if st.button(
-                        "Use this search", key=f"reuse_{entry.id}",
-                        icon=":material/replay:", use_container_width=True,
-                    ):
-                        label = VIN_LABEL_BY_MAKE_MODEL.get((entry.make, entry.model), VIN_LABELS[0])
-                        st.session_state["form_vin_label"] = label
-                        st.session_state["form_symptom"] = entry.symptom
-                        st.rerun()
