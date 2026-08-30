@@ -83,9 +83,9 @@ def _starred_headline(headline: str) -> str:
 # (TILE_TITLES keys, signal counts, star ratings) - never free-text user
 # input - so this is safe to render as raw HTML.
 _CHIP_COLORS = {
-    "red": {"accent": "#f87171"},
-    "amber": {"accent": "#fbbf24"},
-    "green": {"accent": "#4ade80"},
+    "red": {"accent": "#f87171", "glow": "rgba(248,113,113,0.65)"},
+    "amber": {"accent": "#fbbf24", "glow": "rgba(251,191,36,0.65)"},
+    "green": {"accent": "#4ade80", "glow": "rgba(74,222,128,0.7)"},
 }
 SIGNAL_EMOJI = {"reliability": "🔧", "price": "🏷️", "recalls": "📢", "safety": "🛡️"}
 
@@ -210,8 +210,15 @@ DARK_CARD_CSS = """<style>
 }
 [class*="st-key-card_"] [role="progressbar"] > div,
 [class*="st-key-card_"] [role="progressbar"] > div > div {
-    background: linear-gradient(90deg,#3b82f6,#22d3ee,#4ade80) !important;
-    box-shadow: 0 0 10px rgba(74,222,128,0.7) !important;
+    /* Fallback only - every card with tiles gets a per-card override below
+       (progress_overrides) that recolors this to the same red/amber/green
+       severity language as the tile borders and verdict badge. A fixed
+       blue-cyan-green gradient here regardless of the actual score was the
+       bug: it always looked vaguely "good" (green end) no matter how the
+       listing actually scored, so the color carried no real information -
+       exactly what was unclear about it. */
+    background: #64748b !important;
+    box-shadow: none !important;
 }
 [class*="st-key-card_"] div.stButton > button,
 [class*="st-key-card_"] div.stDownloadButton > button {
@@ -715,6 +722,12 @@ with tab_compare:
             for i in range(len(ranked))
         ]
         border_overrides = []
+        # The progress bar's fill color, per card - reuses the exact same
+        # worst-signal-wins _overall_color() the verdict badge already uses,
+        # so the bar's color always means the same thing the badge text
+        # says right above it ("Looks solid" = green bar, "Needs caution" =
+        # red bar) instead of a decorative gradient with no real meaning.
+        progress_overrides = []
         # Single source of truth for each listing's rank label - used both
         # for the card badge below and passed into the comparison chat, so
         # the chat can't ever describe a listing's rank differently than
@@ -729,7 +742,10 @@ with tab_compare:
         # answer sound more sure of itself.
         rank_labels: dict[int, str] = {}
         for i, entry in enumerate(ranked):
-            if not (entry.tiles() and rank_eligible > 1):
+            tiles = entry.tiles()
+            if tiles:
+                progress_overrides.append((entry.id, _CHIP_COLORS[_overall_color(tiles)]))
+            if not (tiles and rank_eligible > 1):
                 continue
             if i == 0:
                 rank_labels[entry.id] = "Recommended - best pick"
@@ -749,13 +765,32 @@ with tab_compare:
         # real, measured misalignment (confirmed via getBoundingClientRect:
         # the recommended card's top sat 16px below its row neighbors),
         # not just a cosmetic nit.
+        # DARK_CARD_CSS goes first, THESE per-card overrides last - both
+        # sides use an equally-specific selector (a class selector and an
+        # attribute selector carry identical CSS specificity), so with
+        # !important on both, the browser's only remaining tiebreaker is
+        # source order: whichever <style> block appears later in the DOM
+        # wins. Getting this backwards is a real, previously-unnoticed bug:
+        # DARK_CARD_CSS's shorthand `border: ... !important` was silently
+        # winning over border_overrides's `border-color` the entire time
+        # (confirmed via getComputedStyle - every card had the same default
+        # border, gold/red never actually applied), because it used to be
+        # injected after these override blocks instead of before.
+        st.markdown(DARK_CARD_CSS, unsafe_allow_html=True)
         if border_overrides:
             rules = "".join(
                 f".st-key-card_{card_id} {{ border-color: {color} !important; border-width: 2px !important; }}"
                 for card_id, color in border_overrides
             )
             st.markdown(f"<style>{rules}</style>", unsafe_allow_html=True)
-        st.markdown(DARK_CARD_CSS, unsafe_allow_html=True)
+        if progress_overrides:
+            rules = "".join(
+                f'.st-key-card_{card_id} [role="progressbar"] > div,'
+                f'.st-key-card_{card_id} [role="progressbar"] > div > div '
+                f'{{ background: {chip["accent"]} !important; box-shadow: 0 0 10px {chip["glow"]} !important; }}'
+                for card_id, chip in progress_overrides
+            )
+            st.markdown(f"<style>{rules}</style>", unsafe_allow_html=True)
         compare_cols = st.columns(3)
         for i, entry in enumerate(ranked):
             tiles = entry.tiles()
