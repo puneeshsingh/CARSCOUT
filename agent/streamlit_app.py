@@ -508,13 +508,11 @@ def _render_comparison_chat_panel(ranked_entries, user_name):
     name in the sidebar doesn't show one person's chat under another's
     searches - the same scoping the searches themselves already use."""
     with st.container(key="chat_panel"):
-        title_col, close_col = st.columns([5, 1])
-        with title_col:
-            st.markdown("**💬 CarScout**")
-        with close_col:
-            if st.button("✕", key="close_comparison_chat"):
-                st.session_state["chat_panel_open"] = False
-                st.rerun()
+        # The toggle button itself (outside this panel) already relabels to
+        # "✕ Close" while the panel is open - an in-panel close button here
+        # too just duplicated it (two close controls stacked on top of each
+        # other, both doing the same thing).
+        st.markdown("**💬 CarScout**")
 
         chat_key = f"comparison_chat_history_{user_name}"
         if chat_key not in st.session_state:
