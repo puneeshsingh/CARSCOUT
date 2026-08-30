@@ -404,13 +404,22 @@ LOGIN_PAGE_CSS = """<style>
 .st-key-login_card div[data-testid="stMarkdownContainer"] * {
     color: #ffffff !important;
 }
-.st-key-login_card div[data-testid="stTextInput"] input {
+.st-key-login_card div[data-testid="stTextInputRootElement"] {
+    /* The visible rounded input "box" the user actually sees - Streamlit
+       renders it as a separate wrapper around the real <input>, with its
+       own opaque light-gray fill (rgb(240,242,246)) that isn't covered by
+       styling the <input> alone. White input text on that pale background
+       was unreadable - confirmed by walking the DOM chain in the browser,
+       not guessed. */
     background: rgba(255,255,255,0.08) !important;
-    color: #ffffff !important;
     border: 1px solid rgba(255,255,255,0.28) !important;
     border-radius: 10px !important;
 }
-.st-key-login_card div[data-testid="stTextInput"] input::placeholder {
+.st-key-login_card div[data-testid="stTextInputRootElement"] input {
+    background: transparent !important;
+    color: #ffffff !important;
+}
+.st-key-login_card div[data-testid="stTextInputRootElement"] input::placeholder {
     color: rgba(255,255,255,0.45) !important;
 }
 .st-key-login_card div[data-testid="stFormSubmitButton"] button {
@@ -539,10 +548,15 @@ VIN_LABEL_BY_MAKE_MODEL = {
 }
 
 with st.sidebar:
-    user_name = st.session_state["user_name"].strip() or None
-    st.markdown(f"**{html.escape(user_name)}**" if user_name else "_Not logged in_")
-    st.caption("Persists across restarts (SQLite locally, Postgres when deployed) - scoped to your name above.")
-    if st.button("Log out", icon=":material/logout:"):
+    # user_name is always set here - the login gate above already requires
+    # a non-empty one before this line is ever reached. The old caption
+    # ("...scoped to your name above") is gone too - it described the
+    # sidebar text input this replaced; there's no "above" to point to
+    # anymore, and the SQLite/Postgres detail it carried belongs in
+    # engineering docs, not the nav pane a user sees on every screen.
+    user_name = st.session_state["user_name"].strip()
+    st.markdown(f"Signed in as **{html.escape(user_name)}**")
+    if st.button("Log out", icon=":material/logout:", use_container_width=True):
         st.session_state["logged_in"] = False
         st.rerun()
 
