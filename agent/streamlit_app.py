@@ -370,7 +370,92 @@ def _escape_for_markdown(text: str) -> str:
 
 LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "branding" / "carscout_logo.jpg"
 
+
+@st.cache_data
+def _logo_b64() -> str:
+    return base64.b64encode(LOGO_PATH.read_bytes()).decode()
+
+
 st.set_page_config(page_title="CarScout", page_icon=str(LOGO_PATH), layout="wide")
+
+# A themed full-page login screen, not a real auth system - there's no
+# account database and the password is never checked, only ever asked for
+# because a login screen without one would look broken, not because it
+# guards anything. Its only real job is the same thing the old sidebar
+# "Your name" field did: label whose searches are whose so "Your evaluated
+# listings" shows one person's history, not everyone's. Gated with
+# st.stop() before the memory engine, VIN listings, or anything else below
+# even initializes - nobody sees (or pays the DB-connect cost for) the rest
+# of the app until they've entered a name.
+LOGIN_PAGE_CSS = """<style>
+[data-testid="stSidebar"] { display: none !important; }
+.st-key-login_card {
+    max-width: 440px;
+    margin: 64px auto 0 !important;
+    background: linear-gradient(135deg, #0a2e35 0%, #124a52 50%, #1a6570 100%) !important;
+    border: 1px solid rgba(255,255,255,0.25) !important;
+    border-radius: 24px !important;
+    box-shadow: 0 0 40px rgba(20,180,160,0.28) !important;
+    padding: 44px 40px !important;
+}
+.st-key-login_card label,
+.st-key-login_card p,
+.st-key-login_card span,
+.st-key-login_card div[data-testid="stMarkdownContainer"] * {
+    color: #ffffff !important;
+}
+.st-key-login_card div[data-testid="stTextInput"] input {
+    background: rgba(255,255,255,0.08) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.28) !important;
+    border-radius: 10px !important;
+}
+.st-key-login_card div[data-testid="stTextInput"] input::placeholder {
+    color: rgba(255,255,255,0.45) !important;
+}
+.st-key-login_card div[data-testid="stFormSubmitButton"] button {
+    border-radius: 12px !important;
+    padding: 0.6rem 0 !important;
+    font-weight: 700 !important;
+    margin-top: 6px !important;
+}
+</style>"""
+
+
+def _render_login_page() -> None:
+    st.markdown(LOGIN_PAGE_CSS, unsafe_allow_html=True)
+    with st.container(key="login_card"):
+        st.markdown(
+            f'<div style="text-align:center;">'
+            f'<img src="data:image/jpeg;base64,{_logo_b64()}" width="84" '
+            f'style="border-radius:16px;box-shadow:0 0 20px rgba(20,180,160,0.4);">'
+            f'<h1 style="margin:16px 0 4px;font-size:26px;">CarScout</h1>'
+            f'<p style="margin:0 0 26px;opacity:0.75;font-size:14px;">'
+            f"Sign in to check and compare used-car listings</p></div>",
+            unsafe_allow_html=True,
+        )
+        with st.form("login_form", border=False):
+            username = st.text_input("Username", placeholder="e.g. Alex")
+            st.text_input("Password", type="password", placeholder="anything works")
+            submitted = st.form_submit_button("Log in", type="primary", use_container_width=True)
+        if submitted:
+            clean = username.strip()
+            if not clean:
+                st.error("Enter a username to continue.")
+            else:
+                st.session_state["user_name"] = clean
+                st.session_state["logged_in"] = True
+                st.rerun()
+        st.caption(
+            "Not real authentication - your password isn't checked or stored. It just labels your "
+            'searches so "Your evaluated listings" shows your own history, not everyone\'s.'
+        )
+
+
+st.session_state.setdefault("logged_in", False)
+if not st.session_state["logged_in"]:
+    _render_login_page()
+    st.stop()
 
 
 @st.cache_resource
@@ -454,25 +539,14 @@ VIN_LABEL_BY_MAKE_MODEL = {
 }
 
 with st.sidebar:
-    st.text_input(
-        "Your name",
-        key="user_name",
-        placeholder="e.g. Alex",
-        help="Not a real login - just labels your searches so \"Your evaluated listings\" shows your own history, not everyone's.",
-    )
     user_name = st.session_state["user_name"].strip() or None
-    if user_name:
-        st.caption("Persists across restarts (SQLite locally, Postgres when deployed) - scoped to your name above.")
-    else:
-        st.caption("Enter your name to save and see your own search history under \"Your evaluated listings\".")
+    st.markdown(f"**{html.escape(user_name)}**" if user_name else "_Not logged in_")
+    st.caption("Persists across restarts (SQLite locally, Postgres when deployed) - scoped to your name above.")
+    if st.button("Log out", icon=":material/logout:"):
+        st.session_state["logged_in"] = False
+        st.rerun()
 
 st.logo(str(LOGO_PATH), size="large", icon_image=str(LOGO_PATH))
-
-
-@st.cache_data
-def _logo_b64() -> str:
-    return base64.b64encode(LOGO_PATH.read_bytes()).decode()
-
 
 # st.columns() sizes columns proportionally to the full page width, so any
 # ratio still leaves a huge gap around a small fixed-width image on a wide
@@ -614,10 +688,17 @@ def _render_comparison_chat_panel(ranked_entries, user_name, rank_labels):
         # session_state (see this function's docstring), so this is the
         # one way to keep a copy of it past the current browser session.
         if len(st.session_state[chat_key]) > 1:
+            # type="primary" isn't decorative here - Streamlit's default
+            # (type="secondary") button is a plain white pill with dark
+            # text, which the rest of this panel never uses; against the
+            # dark gradient background it rendered as a blank white box at
+            # rest (only the hover ring gave it any color at all). Same
+            # fix as "Download PDF" elsewhere in this file, which hits the
+            # identical white-on-dark mismatch.
             st.download_button(
                 "Download chat", data=_build_chat_transcript(user_name, st.session_state[chat_key]),
                 file_name=f"carscout_chat_{user_name}.md".replace(" ", "_"), mime="text/markdown",
-                key="download_chat", icon=":material/download:", use_container_width=True,
+                key="download_chat", type="primary", icon=":material/download:", use_container_width=True,
             )
 
         for msg in st.session_state[chat_key]:
