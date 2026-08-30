@@ -563,6 +563,21 @@ CHAT_WIDGET_CSS = """<style>
 </style>"""
 
 
+def _build_chat_transcript(user_name: str, messages: list[dict]) -> str:
+    """Plain-text export of a chat session for the download button below -
+    the chat itself only ever lives in st.session_state (see
+    _render_comparison_chat_panel's docstring), so this is the one way a
+    user can keep a copy of it past the current browser session."""
+    lines = [f"CarScout chat - {user_name}", f"Exported {_format_pacific(datetime.now(timezone.utc))}", ""]
+    for msg in messages:
+        speaker = "You" if msg["role"] == "user" else "CarScout"
+        lines.append(f"{speaker}: {msg['content']}")
+        if msg.get("sources"):
+            lines.append("Sources: " + ", ".join(f"{s['title']} ({s['url']})" for s in msg["sources"]))
+        lines.append("")
+    return "\n".join(lines)
+
+
 def _render_comparison_chat_panel(ranked_entries, user_name, rank_labels):
     """Chat over the user's own evaluated listings - grounded in the same
     saved tiles/summaries the comparison grid renders, not a second live-
@@ -592,6 +607,18 @@ def _render_comparison_chat_panel(ranked_entries, user_name, rank_labels):
                     "which one to pick, how they compare, or details on any signal."
                 ),
             }]
+
+        # Only once there's an actual conversation beyond the canned
+        # greeting - a download button for a chat nobody has used yet has
+        # nothing worth saving. The chat itself only ever lives in
+        # session_state (see this function's docstring), so this is the
+        # one way to keep a copy of it past the current browser session.
+        if len(st.session_state[chat_key]) > 1:
+            st.download_button(
+                "Download chat", data=_build_chat_transcript(user_name, st.session_state[chat_key]),
+                file_name=f"carscout_chat_{user_name}.md".replace(" ", "_"), mime="text/markdown",
+                key="download_chat", icon=":material/download:", use_container_width=True,
+            )
 
         for msg in st.session_state[chat_key]:
             with st.chat_message(msg["role"]):
