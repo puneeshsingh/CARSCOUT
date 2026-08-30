@@ -38,6 +38,16 @@ TILE_TITLES = {
 # reuses native theming instead of hand-rolled colored HTML.
 TILE_RENDERERS = {"red": st.error, "amber": st.warning, "green": st.success}
 
+# Live status-box labels, keyed by tool name, shown as each tool is called
+# (see run_with_progress's on_event callback below) - real-time progress
+# instead of one blank spinner for the whole ~15-20s run.
+STATUS_LABELS = {
+    "search_complaints": "Searching reliability complaints...",
+    "check_price_estimate": "Checking price fairness...",
+    "check_recalls": "Checking recall history...",
+    "check_safety_rating": "Checking safety rating...",
+}
+
 
 def _overall_color(tiles: dict) -> str:
     """Worst-signal-wins severity, so a report can't lead with a red
@@ -236,12 +246,25 @@ with tab_run:
         with st.spinner("Checking input..."):
             injection_check = guards.check_injection(symptom_clean)
 
-        # Gate 4: the agent itself - only reached if both blocking gates passed.
-        with st.spinner("Agent is running (Think -> Act -> Observe)..."):
-            trace = cla.run_with_trace(
-                make_clean, model_clean, int(year), symptom_clean,
-                asking_price=float(asking_price), odometer=int(odometer), condition=condition,
-            )
+        # Gate 4: the agent itself - only reached if both blocking gates
+        # passed. run_with_progress (not run_with_trace) so the status box
+        # below updates live as each tool is called, instead of a single
+        # blank spinner for the whole ~15-20s run.
+        status_box = st.status("Starting due-diligence checks...", expanded=True)
+
+        def _on_event(phase, payload):
+            if phase == "act":
+                status_box.update(label=STATUS_LABELS.get(payload["tool"], f"Calling {payload['tool']}..."))
+            elif phase == "capped":
+                status_box.update(label="Hit the step cap without a confident answer.", state="error")
+
+        trace = cla.run_with_progress(
+            make_clean, model_clean, int(year), symptom_clean,
+            asking_price=float(asking_price), odometer=int(odometer), condition=condition,
+            on_event=_on_event,
+        )
+        if not trace["hit_step_cap"]:
+            status_box.update(label="Due-diligence checks complete.", state="complete", expanded=False)
 
         final_answer = trace["final_answer"]
         if injection_check["status"] == "flagged":
@@ -269,34 +292,24 @@ with tab_run:
         st.subheader("Final answer")
         TILE_RENDERERS[_overall_color(trace["tiles"])](_escape_for_markdown(final_answer))
 
-        report_header = _report_header(year, make, vehicle_model, asking_price, odometer, symptom_clean)
-        dl_col1, dl_col2 = st.columns(2)
-        with dl_col1:
-            st.download_button(
-                "Download full report (Markdown)",
-                data=report_header + final_answer,
-                file_name=f"carscout_{make}_{vehicle_model}_{year}.md".replace(" ", "_"),
-                mime="text/markdown",
-            )
-        with dl_col2:
-            pdf_bytes = report_pdf.build_report_pdf(
-                f"{year} {make} {vehicle_model}",
-                f"${asking_price:,.0f} - {odometer:,} mi - {symptom_clean}",
-                trace["tiles"], final_answer,
-            )
-            st.download_button(
-                "Download full report (PDF)",
-                data=pdf_bytes,
-                file_name=f"carscout_{make}_{vehicle_model}_{year}.pdf".replace(" ", "_"),
-                mime="application/pdf",
-            )
+        pdf_bytes = report_pdf.build_report_pdf(
+            f"{year} {make} {vehicle_model}",
+            f"${asking_price:,.0f} - {odometer:,} mi - {symptom_clean}",
+            trace["tiles"], final_answer,
+        )
+        st.download_button(
+            "Download full report (PDF)",
+            data=pdf_bytes,
+            file_name=f"carscout_{make}_{vehicle_model}_{year}.pdf".replace(" ", "_"),
+            mime="application/pdf",
+        )
 
-        st.subheader("Think → Act → Observe trace")
-        if not trace["steps"]:
-            st.write("No steps recorded.")
-        for i, step in enumerate(trace["steps"], start=1):
-            label = PHASE_LABELS.get(step["phase"], step["phase"].upper())
-            with st.expander(f"{i}. {label}", expanded=False):
+        with st.expander("Show technical trace (Think → Act → Observe)", expanded=False):
+            if not trace["steps"]:
+                st.write("No steps recorded.")
+            for i, step in enumerate(trace["steps"], start=1):
+                label = PHASE_LABELS.get(step["phase"], step["phase"].upper())
+                st.caption(f"{i}. {label}")
                 if step["phase"] == "act":
                     st.code(f"{step['tool']}({step['args']})", language="python")
                 else:

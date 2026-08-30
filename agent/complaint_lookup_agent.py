@@ -651,6 +651,7 @@ async def _run_with_trace_async(
     asking_price: float,
     odometer: int,
     condition: str | None = None,
+    on_event=None,
 ) -> dict:
     steps = []
     result = {
@@ -664,6 +665,8 @@ async def _run_with_trace_async(
     async for phase, payload in _stream_events(
         make, vehicle_model, year, symptom, asking_price, odometer, condition=condition
     ):
+        if on_event:
+            on_event(phase, payload)
         if phase in ("think", "act", "observe"):
             steps.append({"phase": phase, **payload})
         elif phase == "capped":
@@ -699,6 +702,39 @@ def run_with_trace(
     """
     return asyncio.run(
         _run_with_trace_async(make, vehicle_model, year, symptom, asking_price, odometer, condition=condition)
+    )
+
+
+def run_with_progress(
+    make: str,
+    vehicle_model: str,
+    year: int,
+    symptom: str,
+    asking_price: float,
+    odometer: int,
+    condition: str | None = None,
+    on_event=None,
+) -> dict:
+    """Like run_with_trace(), but calls on_event(phase, payload) synchronously
+    for each event as it happens, so a caller (the Streamlit UI) can show
+    live progress - "searching complaints...", "checking price..." - instead
+    of a blank spinner until the whole run finishes.
+
+    on_event must be called from *inside* the same asyncio.run() call that
+    drives the run - the in-memory MCP session's task-group-based cancel
+    scopes require staying within the same asyncio Task for their whole
+    lifetime. An earlier version of this tried yielding events one at a
+    time from a sync generator via a separate run_until_complete() call per
+    event, which creates a new Task each time and breaks that invariant
+    ("Attempted to exit cancel scope in a different task than it was
+    entered in"). A plain synchronous callback avoids the problem entirely,
+    since calling it doesn't need a Task of its own.
+    """
+    return asyncio.run(
+        _run_with_trace_async(
+            make, vehicle_model, year, symptom, asking_price, odometer,
+            condition=condition, on_event=on_event,
+        )
     )
 
 
