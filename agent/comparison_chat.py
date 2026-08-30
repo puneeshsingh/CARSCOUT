@@ -127,22 +127,30 @@ def stream_comparison_answer(entries: list, question: str, chat_history: list[di
 # of "did it actually check" and "did it just decide to sound confident").
 
 SCOPE_CHECK_SYSTEM_PROMPT = """You are a narrow routing classifier for a used-car comparison chat. You are \
-given a user's question and the make/model of every vehicle listing they've evaluated. Decide ONLY whether \
-answering the question requires general/external knowledge beyond those specific saved listings - e.g. \
-questions about a brand or model's reputation in general, how a listed vehicle compares to models NOT in \
-the list, typical ownership costs, or anything else not about the specific saved listings' own price, \
-mileage, condition, reliability reports, recalls, or safety rating.
+given a user's question and the make/model of every vehicle listing they've evaluated. A web search should \
+fire ONLY for a question that is BOTH (a) genuinely about used cars, vehicles, car ownership, or car buying, \
+AND (b) not answerable from the saved listings alone - e.g. a brand or model's reputation in general, how a \
+listed vehicle compares to models NOT in the list, typical ownership/maintenance/inspection costs, or other \
+car-related facts beyond the specific saved listings' own price, mileage, condition, reliability, recalls, \
+or safety rating.
 
-Answer false (in scope, no web search needed) for anything answerable from the listings themselves, \
-including: which saved listing is cheapest, best, or recommended; comparing two or more saved listings \
-against each other; asking WHICH saved listing has the best or worst reliability, price fairness, recall \
-history, or safety rating (a cross-listing question like "which one has the best safety rating" is still \
-just reading values already in the listings, not general knowledge); or asking about any of those four \
-signals for one specific saved listing.
+Answer false (no web search) for anything answerable from the listings themselves, including: which saved \
+listing is cheapest, best, or recommended; comparing two or more saved listings against each other; asking \
+WHICH saved listing has the best or worst reliability, price fairness, recall history, or safety rating (a \
+cross-listing question like "which one has the best safety rating" is still just reading values already in \
+the listings, not general knowledge); or asking about any of those four signals for one specific saved \
+listing.
 
-Answer true (needs web search) only when the question is clearly asking about something the listings \
-can't cover on their own - a brand/model's general reputation, models not in the saved list, industry or \
-ownership-cost facts, etc.
+Also answer false for anything NOT about cars, vehicles, or car buying at all - general trivia, unrelated \
+topics, or anything else outside this chat's purpose. Never route an off-topic question to a web search just \
+because the listings don't cover it - "not covered by the listings" and "not about cars" are different \
+things, and only the first one can ever justify true.
+
+A question may use an ambiguous acronym or shorthand that only makes sense in a car-buying context (for \
+example "PPI" almost always means "pre-purchase inspection" here, not something unrelated like "Producer \
+Price Index") - read it charitably in that context before deciding it's off-topic.
+
+Answer true (needs web search) only when the question clearly satisfies BOTH conditions above.
 
 Respond with a JSON object: {"needs_web": true or false}."""
 
@@ -173,6 +181,37 @@ def classify_scope(question: str, entries: list) -> dict:
     except Exception as e:
         logger.error("SCOPE check failed, failing closed to in_scope: %s", e)
         return {"status": "error"}
+
+
+QUERY_REWRITE_SYSTEM_PROMPT = """You turn a user's question into a short, effective web search query. The \
+question was asked in the context of buying/evaluating a used car - resolve any ambiguous terms or acronyms \
+using that context (for example, "PPI" in car buying almost always means "pre-purchase inspection", not \
+"Producer Price Index"). Output ONLY the search query text, nothing else - no quotes, no explanation."""
+
+
+def _build_search_query(question: str) -> str:
+    """Rewrites the raw chat question into a disambiguated web search query
+    before it reaches Tavily - a search engine has no notion of this app's
+    domain, so a bare acronym like "PPI" resolves to its far more common
+    general meaning (Producer Price Index) instead of the used-car-buying
+    one (pre-purchase inspection). A dedicated call rather than folding this
+    into the answer-writing prompt, same reasoning as classify_scope above -
+    and it degrades safely: falls back to the raw question on any failure,
+    since a slightly worse query still beats no query."""
+    try:
+        response = _client.chat.completions.create(
+            model=SCOPE_CHECK_MODEL,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": QUERY_REWRITE_SYSTEM_PROMPT},
+                {"role": "user", "content": question},
+            ],
+        )
+        query = (response.choices[0].message.content or "").strip()
+        return query or question
+    except Exception as e:
+        logger.error("QUERY_REWRITE failed, falling back to raw question: %s", e)
+        return question
 
 
 def _search_web(query: str) -> list[dict]:
@@ -256,7 +295,8 @@ def answer_with_web_search(entries: list, question: str, chat_history: list[dict
     or {"status": "error"}.
     """
     try:
-        raw_results = _search_web(question)
+        search_query = _build_search_query(question)
+        raw_results = _search_web(search_query)
         results = _screen_web_results(raw_results)
         if not results:
             return {"status": "no_results"}
@@ -274,7 +314,10 @@ def answer_with_web_search(entries: list, question: str, chat_history: list[dict
             messages=messages,
         )
         answer = response.choices[0].message.content
-        logger.info("COMPARISON_CHAT (web) -> question=%r sources=%d", question, len(results))
+        logger.info(
+            "COMPARISON_CHAT (web) -> question=%r search_query=%r sources=%d",
+            question, search_query, len(results),
+        )
         return {
             "status": "ok",
             "answer": answer,
