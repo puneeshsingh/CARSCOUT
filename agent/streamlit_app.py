@@ -127,7 +127,9 @@ def _escape_for_markdown(text: str) -> str:
     storing to the DB, so the saved text keeps a real "$"."""
     return text.replace("$", "\\$")
 
-st.set_page_config(page_title="CarScout", layout="wide")
+LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "branding" / "carscout_logo.jpg"
+
+st.set_page_config(page_title="CarScout", page_icon=str(LOGO_PATH), layout="wide")
 
 
 @st.cache_resource
@@ -223,11 +225,17 @@ with st.sidebar:
     else:
         st.caption("Enter your name to save and see your own search history under \"Your evaluated listings\".")
 
-st.title("CarScout — A Deep Agent for Used-Car Due Diligence")
-st.caption(
-    "Checks reliability, price fairness, recalls, and safety for a used-car listing - grounded "
-    "in real NHTSA and Craigslist data, never guessed from training knowledge."
-)
+st.logo(str(LOGO_PATH), size="large", icon_image=str(LOGO_PATH))
+
+col_logo, col_title = st.columns([1, 8], vertical_alignment="center")
+with col_logo:
+    st.image(str(LOGO_PATH), width=72)
+with col_title:
+    st.title("CarScout — A Deep Agent for Used-Car Due Diligence")
+    st.caption(
+        "Checks reliability, price fairness, recalls, and safety for a used-car listing - grounded "
+        "in real NHTSA and Craigslist data, never guessed from training knowledge."
+    )
 
 tab_run, tab_compare = st.tabs(["Run a new check", "Your evaluated listings"])
 
