@@ -4,14 +4,18 @@ Input gates for the CarScout Streamlit UI, run in order before the agent:
 1. check_moderation() - OpenAI Moderation API. Blocks profanity, harassment,
    violence, and other harmful content. A purpose-built classifier, not a
    keyword list or embedding similarity - moderation needs the former.
-2. check_relevance() - three layers, cheapest first:
+2. check_relevance() - two layers, cheapest first:
    a. word-count floor - rejects inputs under MIN_WORD_COUNT words outright
-      ("vehicle" is 1 word; no point embedding it).
+      ("vehicle" is 1 word; no point calling the model on it).
    b. generic-terms blocklist - rejects inputs made up entirely of
       car-adjacent but contentless words ("car problem"), even if they
       clear the word-count floor.
-   c. embedding similarity against vehicle-issue anchor phrases - catches
-      everything else that's still vague or off-topic ("hello", "test").
+   c. a dedicated classifier call - catches everything else still vague or
+      off-topic ("hello", "test"). An earlier version used embedding
+      similarity against anchor phrases instead; measured false-negative
+      rate on ordinary symptom phrasings ("AC blows warm air", "brake pedal
+      feels spongy") was ~58%, while "nice car" scored as relevant - see
+      evals/taxonomy.md #10.
 3. check_injection() - a dedicated classifier call asking only "is this an
    injection attempt?", separate from the agent's own report-writing
    completion. Non-blocking (informational only): it decides whether to
@@ -27,7 +31,6 @@ blocking a legitimate user.
 
 import json
 import logging
-import math
 import string
 
 from openai import OpenAI
@@ -38,17 +41,24 @@ _client = OpenAI()
 
 MODERATION_MODEL = "omni-moderation-latest"
 
-RELEVANCE_MODEL = "text-embedding-3-small"
-RELEVANCE_ANCHORS = [
-    "a mechanical, electrical, or safety problem with a vehicle",
-    "a symptom or malfunction a car is experiencing",
-    "a question about known reliability issues for a car",
-]
-# Empirically measured with text-embedding-3-small: off-topic inputs like
-# "hello" (0.22), "test" (0.29), and unrelated questions (0.06) all scored
-# well under 0.35, while real vehicle symptoms scored 0.44-0.52. 0.35 sits
-# in the gap with margin on both sides.
-RELEVANCE_THRESHOLD = 0.35
+RELEVANCE_CHECK_MODEL = "gpt-4o-mini"
+
+RELEVANCE_CHECK_SYSTEM_PROMPT = """You are a narrow relevance classifier for a used-car due-diligence \
+assistant. You are given one piece of user input meant to describe a symptom or malfunction a vehicle is \
+experiencing, or a question about a specific vehicle listing. Decide ONLY whether the input actually \
+describes something concrete enough to look up: a mechanical, electrical, cosmetic, or safety problem the \
+vehicle is having (however minor or unusual - brakes, engine, transmission, electronics, HVAC, body, \
+interior, warning lights, unusual noises or smells, etc.), or a specific question about the vehicle's \
+reliability, price, recalls, or safety.
+
+Answer true for ANY input describing a real vehicle symptom or asking a real question about the vehicle, \
+no matter how minor it sounds or how it's phrased - "brake pedal feels spongy", "AC blows warm air", \
+"sunroof won't close all the way", and "battery keeps dying overnight" are all clearly true. Answer false \
+only when the input describes no actual vehicle problem or question at all: greetings ("hello"), small \
+talk, test input ("test"), unrelated topics, or vague car-adjacent chatter with no real content ("nice \
+car", "car problem" with nothing else).
+
+Respond with a JSON object: {"is_relevant": true or false}."""
 
 # Below this many words, an input can't describe an actual symptom - reject
 # before even running the (more expensive) embedding check. Set to 2 (not 3)
@@ -97,13 +107,6 @@ INJECTION_NOTE = (
 )
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
-    return dot / (norm_a * norm_b)
-
-
 def _normalized_words(text: str) -> list[str]:
     return [w.strip(string.punctuation).lower() for w in text.split() if w.strip(string.punctuation)]
 
@@ -127,32 +130,42 @@ def check_moderation(text: str) -> dict:
 
 
 def check_relevance(text: str) -> dict:
-    """Returns {"status": "relevant" | "irrelevant" | "error", "score": float | None, "error"?: str}.
+    """Returns {"status": "relevant" | "irrelevant" | "error", "error"?: str}.
 
-    "score" is None when blocked by the word-count or blocklist layer -
-    those never reach the embedding call.
+    The word-count floor and generic-terms blocklist run first (cheap, no
+    API call) to reject obviously-empty input outright. Everything else goes
+    to a dedicated classifier call - an embedding-similarity-against-anchor-
+    phrases approach was tried first but didn't reliably tell real symptoms
+    from junk (see evals/taxonomy.md #10). Fails closed like check_moderation:
+    an API error blocks the run rather than letting unfiltered input through.
     """
     words = _normalized_words(text)
 
     if len(words) < MIN_WORD_COUNT:
         logger.info("RELEVANCE -> status=irrelevant reason=too_short word_count=%d text=%r", len(words), text)
-        return {"status": "irrelevant", "score": None}
+        return {"status": "irrelevant"}
 
     if all(word in GENERIC_TERMS_BLOCKLIST for word in words):
         logger.info("RELEVANCE -> status=irrelevant reason=generic_only text=%r", text)
-        return {"status": "irrelevant", "score": None}
+        return {"status": "irrelevant"}
 
     try:
-        response = _client.embeddings.create(model=RELEVANCE_MODEL, input=[text, *RELEVANCE_ANCHORS])
-        vectors = [d.embedding for d in response.data]
-        query_vector, anchor_vectors = vectors[0], vectors[1:]
-        best_score = max(_cosine_similarity(query_vector, anchor) for anchor in anchor_vectors)
-        status = "relevant" if best_score >= RELEVANCE_THRESHOLD else "irrelevant"
-        logger.info("RELEVANCE -> status=%s score=%.4f text=%r", status, best_score, text)
-        return {"status": status, "score": best_score}
+        response = _client.chat.completions.create(
+            model=RELEVANCE_CHECK_MODEL,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": RELEVANCE_CHECK_SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+        )
+        result = json.loads(response.choices[0].message.content)
+        status = "relevant" if result.get("is_relevant") else "irrelevant"
+        logger.info("RELEVANCE -> status=%s text=%r", status, text)
+        return {"status": status}
     except Exception as e:
         logger.error("RELEVANCE check failed, failing closed: %s", e)
-        return {"status": "error", "score": None, "error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 
 def check_injection(text: str) -> dict:

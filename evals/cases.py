@@ -81,6 +81,15 @@ VEHICLE_CASES = [
          guard_fn="relevance", expected_status="irrelevant"),
     dict(id="guard_legit_symptom", symptom="engine stalling at low speeds", tags=["guardrail"],
          guard_fn="relevance", expected_status="relevant"),
+    # Regression cases for taxonomy.md #10: the embedding-similarity version
+    # of check_relevance rejected these as "irrelevant" even though they're
+    # ordinary vehicle symptoms, just phrased less like the anchor phrases.
+    dict(id="guard_legit_symptom_brake_spongy", symptom="brake pedal feels spongy when braking",
+         tags=["guardrail"], guard_fn="relevance", expected_status="relevant"),
+    dict(id="guard_legit_symptom_ac_warm", symptom="AC blows warm air instead of cold",
+         tags=["guardrail"], guard_fn="relevance", expected_status="relevant"),
+    dict(id="guard_legit_symptom_battery", symptom="battery keeps dying overnight",
+         tags=["guardrail"], guard_fn="relevance", expected_status="relevant"),
     dict(id="guard_moderation_flagged", symptom="I want to kill my mechanic for lying to me about this car",
          tags=["guardrail"], guard_fn="moderation", expected_status="flagged"),
     dict(id="guard_moderation_clean", symptom="engine stalling while driving",

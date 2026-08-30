@@ -2,7 +2,7 @@
 Eval suite runner for the CarScout due-diligence agent.
 
 Usage:
-  uv run python evals/run_evals.py           # full suite (24 cases)
+  uv run python evals/run_evals.py           # full suite (27 cases)
   uv run python evals/run_evals.py --golden  # golden dataset only (3 cases)
 
 The golden dataset is cases.py's GOLDEN_CASES plus the two VEHICLE_CASES

@@ -4,7 +4,7 @@
 
 **How we found these:** rather than guessing what might break and only testing for that, we first read all 18 real answers with fresh eyes and took notes on anything that looked off - *before* looking at what our automated checks said. That order matters: it's how we caught a bug none of our checks were even looking for (#1 below). The raw notes are in `evals/open_coding_notes.md`; how those raw notes got grouped into the categories below is in `evals/axial_coding_notes.md`.
 
-## The 9 things we checked for, ranked by how much they matter
+## The 10 things we checked for, ranked by how much they matter
 
 | # | What we checked | How often it happened | How bad is it (1-5) | Why it's ranked here |
 |---|---|---|---|---|
@@ -13,12 +13,13 @@
 | 3 | **A normal question got mistaken for an attack** | 0 out of 10 after the real fix (was 4 out of 10 on a scenario that exposed it, after an earlier fix attempt had wrongly looked clean) | 3 - annoying, not dangerous | Looked fixed once (0/5 on one repeated scenario), but that scenario didn't generalize - a different vehicle/condition combo still failed ~40% of the time until the detection was rebuilt as its own dedicated check. |
 | 4 | The agent skipped one of its 4 required checks | 0 out of 18 | 4 - a real gap if it happened | Never happened in this batch, but worth watching as we add more test cases. |
 | 5 | The agent complied with a hidden/injected instruction | 0 out of 3 | 5 - would mean the agent lies to the user | Never happened, but only tested with 3 attack phrasings so far - small sample. |
-| 6 | The spam/relevance filter blocked or let through the wrong thing | 0 out of 5 | 3 - annoying, not dangerous | All 5 filter tests behaved correctly. |
+| 6 | The spam/relevance filter blocked or let through the wrong thing | 0 out of 5 in this batch - but see #10 | 3 - annoying, not dangerous | All 5 filter tests behaved correctly at the time, but the sample was too small and too easy - see #10, found later with a much larger, harder test batch. |
 | 7 | A raw internal number (like a match score) leaked into the answer | 0 out of 18 | 2 - minor polish issue | Never happened. Lowest priority of the original seven. |
 | 8 | **Prices shown inconsistently (missing "$", or rendered in a code-style font)** | Fixed - confirmed correct in the actual rendered browser output | 4 - looked cosmetic, took four attempts to find the real cause | Found via a user screenshot, not the automated checks - and couldn't have been, since the automated checks only see the raw text, not the rendered page. Real cause: Streamlit's markdown renderer treats "$...$" as LaTeX math, silently swallowing "$" characters from any text with two or more dollar amounts. See the write-up below for the three earlier attempts that didn't address this. |
 | 9 | **The "no clear match" explanation guessed at a reason instead of checking one** | Fixed - confirmed against a real case where the guess was wrong | 3 - misleading, not dangerous | Found by a user questioning the wording directly, not by any automated check. The canned explanation ("simply an edge case not well-represented in the data") was static boilerplate that never looked at what was actually retrieved, so it could - and did - contradict the real data. |
+| 10 | **The relevance filter rejected real symptoms about 58% of the time** | 7 out of 12 legitimate symptoms wrongly rejected, in a batch built to test this specifically | 4 - blocks a legitimate user outright | Found while running the deployed app for an unrelated demo, when an ordinary symptom ("brake pedal feels spongy") got rejected. The original 5-case test batch (#6) was too small and too easy to catch this - a broader batch of 12 real symptoms and 7 junk inputs showed the filter's embedding-similarity approach couldn't reliably separate the two; "nice car" even scored as relevant. |
 
-*(Items 1-3 are unchanged from the earlier version of this document. Items 8-9 were added later, at the point each was found - the numbering isn't a re-ranking of the original seven.)*
+*(Items 1-3 are unchanged from the earlier version of this document. Items 8-10 were added later, at the point each was found - the numbering isn't a re-ranking of the original seven.)*
 
 ## #1: Recall counts were inflated/duplicated (found and fixed)
 
@@ -88,11 +89,22 @@
 
 *(For engineers: `closest_candidate: ComplaintResult | None` added to `RetrievalResponse` in `src/schemas.py`, populated in `src/retrieve.py`'s `search_complaints()` from the same already-computed candidate list (candidates are already sorted best-first, since Pinecone returns matches in descending score order). Consumed in `agent/complaint_lookup_agent.py`'s `_format_no_confident_match_answer()`, gated on a `NEAR_MISS_MIN_SCORE = 0.55` floor - close enough to the 0.70 confidence threshold to be worth quoting, far enough below it to still be honestly labeled "not a confident match." Not caught by any automated check - this was a wording/honesty issue, not something `no_score_leakage` or any other current check evaluates.)*
 
-## The other 4 categories: nothing wrong found
+## #10: The relevance filter rejected real symptoms about 58% of the time (found and fixed)
+
+**What happened:** while running the deployed app for an unrelated demo (proving cross-session memory recall), a completely ordinary symptom - "brake pedal feels spongy when braking" - got rejected with "Please describe the actual issue." Testing showed this wasn't a one-off: of 12 real vehicle symptoms tried, 7 were wrongly rejected as irrelevant, including "AC blows warm air instead of cold," "battery keeps dying overnight," and "sunroof wont close all the way." Meanwhile "nice car" - clearly not a real symptom - scored as relevant.
+
+**Why it happened:** the relevance filter worked by embedding the user's text and three fixed "anchor" phrases (e.g. "a symptom or malfunction a car is experiencing"), then checking whether the closest anchor was similar enough. This approach was calibrated against a handful of examples early on and looked fine at the time (item #6 above, 5 for 5) - but a similarity score between two independently-written sentences is a noisy signal, and the small original test batch didn't have enough variety to expose that noise. A real symptom phrased in everyday words ("spongy," "won't close," "keeps dying") just doesn't always land close to a formally-worded anchor phrase, even though it's obviously describing a real problem to a person reading it.
+
+**How we fixed it:** replaced the embedding-similarity check with a dedicated classifier call (the same pattern already used for `check_injection` - a single, narrowly-scoped question asked directly of the model, rather than a similarity heuristic). The word-count floor and generic-terms blocklist (rejecting inputs like "car problem" outright) stayed, since those are cheap and were never the problem.
+
+**Did it work?** Yes - re-ran the same 12 legitimate symptoms and 7 junk inputs that exposed the original bug: 12/12 correctly relevant, 7/7 correctly irrelevant. Three of the legitimate symptoms were added as permanent regression cases in `evals/cases.py`.
+
+*(For engineers: the fix is in `agent/guards.py`'s `check_relevance()` - `RELEVANCE_CHECK_SYSTEM_PROMPT` replaces `RELEVANCE_ANCHORS`/`RELEVANCE_THRESHOLD`/`_cosine_similarity`. Not caught by `guardrail_correctness` in the original 5-case batch - the eval suite is only as good as the cases in it, and this one needed a wider net.)*
+
+## The other 3 categories: nothing wrong found
 
 - **Skipping one of the 4 required checks** - never happened, 18 for 18.
 - **Complying with a hidden/injected instruction** - never happened, 3 for 3.
-- **Spam/relevance filter mistakes** - never happened, 5 for 5.
 - **Raw internal numbers leaking into an answer** - never happened, 18 for 18.
 
 ## A note on how the checks themselves improved
@@ -102,3 +114,4 @@ Three things worth knowing about the checking process itself, not just the app:
 1. One of our checks was initially too strict - it expected the words "VIN" or "confirm" specifically when the app hedges about a recall's repair status, but the app sometimes uses different, equally valid wording like "verify whether this has been addressed." We loosened the check's wording list rather than treat it as a second app bug.
 2. The recall-duplication bug (#1) is a good example of why reading real answers matters, not just running automated checks - none of our first 6 checks were even looking for duplicate recalls, because we designed them based on guesses about what might go wrong. Reading the real output first is what actually found it.
 3. The false-positive bug (#3) is a good example of why a fix needs to be tested against *varied* scenarios, not just repeats of the one that first exposed it - testing the same input 5 times mostly proves the model is repeatable on that input, not that the underlying issue is gone.
+4. The relevance-filter bug (#10) is the same lesson again, in a different place: the original guardrail test batch was only 5 cases, and all 5 happened to be easy - either obviously off-topic or obviously a clear symptom. A guard that passes its own small test suite isn't proven correct, just proven correct *on the cases someone thought to write*.
