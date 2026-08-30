@@ -429,6 +429,101 @@ st.caption(
     "in real NHTSA and Craigslist data, never guessed from training knowledge."
 )
 
+# Chat over the user's own evaluated listings, as a modal instead of an
+# always-visible section at the bottom of the page - opened by a floating
+# top-right button (see CHAT_WIDGET_CSS) instead of scrolling to find it.
+# Dark-themed to match the comparison cards, even though the dialog itself
+# renders outside any [class*="st-key-card_"] container those styles are
+# scoped to.
+CHAT_WIDGET_CSS = """<style>
+.st-key-open_comparison_chat button {
+    position: fixed !important;
+    top: 70px !important;
+    right: 24px !important;
+    left: auto !important;
+    width: auto !important;
+    z-index: 999 !important;
+    border-radius: 24px !important;
+    background: linear-gradient(135deg, #0a2e35 0%, #1a6570 100%) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.35) !important;
+    box-shadow: 0 0 16px rgba(20,180,160,0.35) !important;
+    padding: 0.5rem 1.1rem !important;
+}
+/* [data-testid="stDialog"] itself is the full-viewport backdrop wrapper,
+   not the visible card - confirmed via computed-style inspection (it was
+   1400x1100, covering the whole page, while the actual modal surface is
+   its direct child div at a much smaller rect). Gradient goes on that
+   child, not the backdrop, or the "chat window" look becomes "the whole
+   page turned teal" instead of a modal floating on a dimmed backdrop. */
+[data-testid="stDialog"] > div {
+    background: linear-gradient(135deg, #0a2e35 0%, #124a52 50%, #1a6570 100%) !important;
+    border-radius: 20px !important;
+}
+[data-testid="stDialog"] p,
+[data-testid="stDialog"] h1,
+[data-testid="stDialog"] h2,
+[data-testid="stDialog"] h3,
+[data-testid="stDialog"] span,
+[data-testid="stDialog"] label {
+    color: #ffffff !important;
+}
+</style>"""
+
+
+@st.dialog("CarScout", width="large")
+def _comparison_chat_dialog(ranked_entries, user_name):
+    """Modal chat over the user's own evaluated listings - grounded in the
+    same saved tiles/summaries the comparison grid renders, not a second
+    live-tool-calling agent (see comparison_chat.py). Chat history is keyed
+    by user_name (session_state, not persisted to the DB) so switching the
+    name in the sidebar doesn't show one person's chat under another's
+    searches - the same scoping the searches themselves already use."""
+    chat_key = f"comparison_chat_history_{user_name}"
+    if chat_key not in st.session_state:
+        st.session_state[chat_key] = [{
+            "role": "assistant",
+            "content": (
+                f"Hi {user_name}! Ask me anything about your evaluated listings - "
+                "which one to pick, how they compare, or details on any signal."
+            ),
+        }]
+
+    for msg in st.session_state[chat_key]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if question := st.chat_input("e.g. Which one has the best safety rating?"):
+        # Same moderation gate as the main due-diligence flow (fail closed
+        # on flagged/error) - not the relevance check, though, which is
+        # tuned to reject anything that isn't a car-symptom description and
+        # would wrongly block ordinary comparison questions like "which is
+        # cheapest".
+        moderation = guards.check_moderation(question)
+        if moderation["status"] in ("flagged", "error"):
+            st.error("This input can't be processed - please ask about the listings above.")
+        else:
+            history_before = list(st.session_state[chat_key])
+            st.session_state[chat_key].append({"role": "user", "content": question})
+            with st.spinner("Thinking..."):
+                result = comparison_chat.answer_comparison_question(ranked_entries, question, history_before)
+            if result["status"] == "ok":
+                st.session_state[chat_key].append({"role": "assistant", "content": result["answer"]})
+            else:
+                st.session_state[chat_key].append({
+                    "role": "assistant",
+                    "content": "Something went wrong answering that - please try again.",
+                })
+            # scope="fragment", not the default "app": @st.dialog wraps its
+            # content in a Streamlit fragment, and a plain st.rerun() reruns
+            # the *whole script* by default - which re-evaluates the
+            # `if st.button(...)` that opened this dialog, finds it False
+            # again (buttons only return True on their own click's rerun),
+            # and never reopens it. Scoping the rerun to just this fragment
+            # refreshes the chat display without closing the modal around it.
+            st.rerun(scope="fragment")
+
+
 tab_run, tab_compare = st.tabs(["Run a new check", "Your evaluated listings"])
 
 # tab_compare renders BEFORE tab_run in the script (their with-block order
@@ -606,42 +701,12 @@ with tab_compare:
                             st.session_state["form_symptom"] = entry.symptom
                             st.rerun()
 
-        # Chat over the listings above - grounded in the same saved tiles/
-        # summaries just rendered, not a second live-tool-calling agent (see
-        # comparison_chat.py). Keyed by user_name so switching the name in
-        # the sidebar doesn't show one person's chat history under another's
-        # searches - the same scoping the searches themselves already use.
-        st.divider()
-        st.subheader("Ask about your evaluated listings")
-        chat_key = f"comparison_chat_history_{user_name}"
-        st.session_state.setdefault(chat_key, [])
-
-        for msg in st.session_state[chat_key]:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-        if question := st.chat_input("e.g. Which one has the best safety rating?"):
-            # Same moderation gate as the main due-diligence flow (fail
-            # closed on flagged/error) - not the relevance check, though,
-            # which is tuned to reject anything that isn't a car-symptom
-            # description and would wrongly block ordinary comparison
-            # questions like "which is cheapest".
-            moderation = guards.check_moderation(question)
-            if moderation["status"] in ("flagged", "error"):
-                st.error("This input can't be processed - please ask about the listings above.")
-            else:
-                history_before = list(st.session_state[chat_key])
-                st.session_state[chat_key].append({"role": "user", "content": question})
-                with st.spinner("Thinking..."):
-                    result = comparison_chat.answer_comparison_question(ranked, question, history_before)
-                if result["status"] == "ok":
-                    st.session_state[chat_key].append({"role": "assistant", "content": result["answer"]})
-                else:
-                    st.session_state[chat_key].append({
-                        "role": "assistant",
-                        "content": "Something went wrong answering that - please try again.",
-                    })
-                st.rerun()
+        # Floating top-right button opens the chat above as a modal (see
+        # CHAT_WIDGET_CSS + _comparison_chat_dialog) instead of an always-
+        # visible section at the bottom of the page.
+        st.markdown(CHAT_WIDGET_CSS, unsafe_allow_html=True)
+        if st.button("💬 CarScout", key="open_comparison_chat"):
+            _comparison_chat_dialog(ranked, user_name)
 
 with tab_run:
     selected_label = st.selectbox(
