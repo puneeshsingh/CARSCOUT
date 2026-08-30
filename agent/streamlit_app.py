@@ -107,7 +107,7 @@ def _signal_squares_html(tiles: dict) -> str:
         safe_title, safe_headline = html.escape(title), html.escape(headline)
         cells.append(
             f'<div title="{safe_title}: {safe_headline}" style="display:flex;flex-direction:column;'
-            f'gap:6px;height:96px;padding:14px 16px;border-radius:12px;'
+            f'gap:6px;height:96px;box-sizing:border-box;padding:14px 16px;border-radius:12px;'
             f'background:rgba(255,255,255,0.07);border:1px solid {accent};overflow:hidden;">'
             f'<div style="display:flex;align-items:center;gap:7px;">'
             f'<span style="font-size:15px;line-height:1;">{SIGNAL_EMOJI[signal]}</span>'
@@ -118,8 +118,14 @@ def _signal_squares_html(tiles: dict) -> str:
             f"{safe_headline}</span>"
             f"</div>"
         )
+    # box-sizing:border-box on each cell makes height:96px the actual
+    # rendered box (padding+border included), not padding added on top of
+    # it - without it, the 4 tiles could render at very slightly different
+    # total heights depending on whether a global box-sizing reset happens
+    # to be present, instead of the identical height this grid is supposed
+    # to guarantee.
     return (
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;">'
+        '<div class="dark-tile-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">'
         + "".join(cells)
         + "</div>"
     )
@@ -152,7 +158,7 @@ DARK_CARD_CSS = """<style>
 [class*="st-key-card_"] [data-testid="stExpander"] summary {
     color: #ffffff !important;
 }
-.dark-badge-row { display: flex; gap: 10px; margin: 18px 6px; flex-wrap: wrap; }
+.dark-badge-row { display: flex; gap: 10px; margin: 18px 18px; flex-wrap: wrap; }
 .dark-badge-gold {
     background: linear-gradient(90deg,#f5c542,#e8a72c); color: #3a2a00;
     font-size: 13px; font-weight: 700; padding: 8px 16px; border-radius: 20px;
@@ -162,18 +168,19 @@ DARK_CARD_CSS = """<style>
     background: rgba(255,255,255,0.15); color: #ffffff; font-size: 13px; font-weight: 600;
     padding: 8px 16px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px;
 }
-.dark-title { color: #ffffff; font-size: 21px; font-weight: 700; margin: 4px 6px 6px; }
-.dark-signals { color: rgba(255,255,255,0.62); font-size: 13px; margin: 0 6px 8px; }
+.dark-title { color: #ffffff; font-size: 21px; font-weight: 700; margin: 4px 18px 6px; }
+.dark-signals { color: rgba(255,255,255,0.62); font-size: 13px; margin: 0 18px 8px; }
 .dark-price-row {
     display: flex; gap: 12px; align-items: center; color: #ffffff; font-weight: 700;
-    font-size: 15px; margin: 18px 6px 18px;
+    font-size: 15px; margin: 18px 18px 18px;
 }
 .dark-price-row span.dim { color: rgba(255,255,255,0.4); font-weight: 400; }
 .dark-info-bar {
     background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
     border-radius: 12px; padding: 14px 18px; color: #ffffff; font-size: 14px;
-    display: flex; align-items: center; gap: 10px; margin: 0 6px 20px;
+    display: flex; align-items: center; gap: 10px; margin: 0 18px 20px;
 }
+.dark-tile-grid { margin: 0 18px 20px; }
 [class*="st-key-card_"] [role="progressbar"] {
     background: rgba(255,255,255,0.15) !important;
 }
@@ -190,7 +197,7 @@ DARK_CARD_CSS = """<style>
     min-height: 2.2rem !important;
 }
 [class*="st-key-card_"] [data-testid="stExpander"] {
-    margin: 0 6px 14px;
+    margin: 0 18px 14px;
     background: transparent !important;
     border: 1px solid rgba(255,255,255,0.18) !important;
     border-radius: 10px !important;
