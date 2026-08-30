@@ -63,10 +63,9 @@ def _get_memory_engine():
 memory_engine = _get_memory_engine()
 
 # (make, model, default_year) - the same shortlist the retrieval dataset was
-# filtered to when the Chroma collection was built (see CarScout/src/ingest.py).
+# filtered to when the Pinecone index was built (see CarScout/src/ingest.py).
 # Kept as a plain literal here rather than imported from src/ingest.py to
-# avoid pulling in that module's heavier deps (pandas, chromadb) just for a
-# 6-entry list.
+# avoid pulling in that module's heavier deps (pandas) just for a 6-entry list.
 VEHICLE_SHORTLIST = [
     ("Hyundai", "Kona", 2020),
     ("Mazda", "Mazda3", 2017),

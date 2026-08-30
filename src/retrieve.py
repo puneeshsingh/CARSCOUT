@@ -1,22 +1,17 @@
-import chromadb
-from chromadb.utils import embedding_functions
 from openai import OpenAI
+from pinecone import Pinecone
 
-from config import CHROMA_DB_DIR, EMBEDDING_MODEL, OPENAI_API_KEY
-from ingest import COLLECTION_NAME
+from config import EMBEDDING_MODEL, OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_INDEX_NAME
+from ingest import NARRATIVE_METADATA_KEY
 from schemas import ComplaintResult, RetrievalResponse
 
 YEAR_TOLERANCE = 1
 DEFAULT_MIN_SCORE = 0.70
 
 
-def _get_collection():
-    client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
-    embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-        api_key=OPENAI_API_KEY,
-        model_name=EMBEDDING_MODEL,
-    )
-    return client.get_collection(name=COLLECTION_NAME, embedding_function=embedding_fn)
+def _get_index():
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    return pc.Index(PINECONE_INDEX_NAME)
 
 
 def _embed_query(query: str) -> list[float]:
@@ -33,43 +28,37 @@ def search_complaints(
     top_k: int = 5,
     min_score: float = DEFAULT_MIN_SCORE,
 ) -> RetrievalResponse:
-    collection = _get_collection()
+    index = _get_index()
 
     where = {
-        "$and": [
-            {"make": make.upper()},
-            {"model": model.upper()},
-            {"model_year": {"$gte": year - YEAR_TOLERANCE}},
-            {"model_year": {"$lte": year + YEAR_TOLERANCE}},
-        ]
+        "make": {"$eq": make.upper()},
+        "model": {"$eq": model.upper()},
+        "model_year": {"$gte": year - YEAR_TOLERANCE, "$lte": year + YEAR_TOLERANCE},
     }
 
     query = query.strip().lower()
     query_embedding = _embed_query(query)
 
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k,
-        where=where,
-        include=["documents", "metadatas", "distances"],
+    results = index.query(
+        vector=query_embedding,
+        top_k=top_k,
+        filter=where,
+        include_metadata=True,
     )
 
     candidates = []
-    for doc, metadata, distance in zip(
-        results["documents"][0], results["metadatas"][0], results["distances"][0]
-    ):
-        # Collection uses Chroma's default L2 space (squared L2 distance).
-        # OpenAI embeddings are unit-normalized, so squared L2 distance
-        # converts to cosine similarity as: sim = 1 - distance / 2.
-        similarity_score = 1 - distance / 2
+    for match in results["matches"]:
+        metadata = match["metadata"]
+        # Index uses cosine metric, so Pinecone's match score is already a
+        # cosine similarity (higher = more similar) - no conversion needed.
         candidates.append(
             ComplaintResult(
                 complaint_id=metadata["complaint_id"],
-                score=similarity_score,
+                score=match["score"],
                 make=metadata["make"],
                 model=metadata["model"],
                 year=metadata["model_year"],
-                narrative=doc,
+                narrative=metadata[NARRATIVE_METADATA_KEY],
             )
         )
 

@@ -44,3 +44,7 @@ data_cache/*
 # Local SQLite memory store - Render uses Postgres instead (DATABASE_URL).
 data_cache/memory.db
 
+# Chroma is no longer used (migrated to Pinecone) - ignore in case any old
+# local state still exists on a dev machine.
+chroma_db/
+

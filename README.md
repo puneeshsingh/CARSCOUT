@@ -4,7 +4,7 @@ Used-car due-diligence agent. Given a vehicle (make/model/year, from a 6-vehicle
 demo shortlist) and a listing's asking price, mileage, and a described symptom,
 a LangGraph deep agent calls four MCP tools and produces one report covering:
 
-- **Reliability** — known-issue search over real NHTSA complaint narratives (RAG/Chroma)
+- **Reliability** — known-issue search over real NHTSA complaint narratives (RAG/Pinecone)
 - **Price fairness** — asking price vs. comparable real Craigslist listings for that mileage/year
 - **Recall history** — official NHTSA recall campaigns for that make/model/year (never claims a specific listing's repair is outstanding - that needs the actual VIN)
 - **Safety rating** — live NHTSA crash-test star rating
@@ -13,13 +13,13 @@ a LangGraph deep agent calls four MCP tools and produces one report covering:
 
 ```
 uv sync
-cp .env.example .env   # fill in OPENAI_API_KEY
+cp .env.example .env   # fill in OPENAI_API_KEY, PINECONE_API_KEY
 ```
 
 Before running the agent, build the local data caches (one-time, or whenever the source datasets change):
 
 ```
-uv run python src/ingest.py          # NHTSA complaints -> Chroma vector store
+uv run python src/ingest.py          # NHTSA complaints -> Pinecone index (created automatically if missing)
 uv run python src/ingest_prices.py   # Craigslist listings -> data_cache/vehicles_shortlist.parquet
 uv run python src/ingest_recalls.py  # NHTSA recalls -> data_cache/recalls_shortlist.parquet
 ```
@@ -31,8 +31,8 @@ Safety ratings are looked up live against NHTSA's public API at query time - no 
 - `data/` — junction to the local dataset folder (NHTSA complaints/recalls + Craigslist vehicles). Not tracked in git. (`investigations.csv` and `ratings.csv` also present but not yet used - `ratings.csv` only covers 2024+ model years, so live safety ratings come from NHTSA's API instead.)
 - `data_cache/` — filtered/cached subsets of the above, scoped to the demo vehicle shortlist. Not tracked in git as a whole, but the two small shortlist parquet files are committed (see [Week 5](#week-5-memory--deployment)) since the app needs them at runtime and can't regenerate them without the local-only raw datasets.
 - `src/config.py` — paths, model names, the shared vehicle shortlist, and env loading.
-- `src/ingest.py` — builds the Chroma vector store from the NHTSA complaints dataset.
-- `src/retrieve.py` — complaint query interface against the Chroma store.
+- `src/ingest.py` — builds the Pinecone index from the NHTSA complaints dataset.
+- `src/retrieve.py` — complaint query interface against the Pinecone index.
 - `src/ingest_prices.py` / `src/price_check.py` — Craigslist price data caching and comp-based price fairness check.
 - `src/ingest_recalls.py` / `src/recall_check.py` — NHTSA recall data caching and recall history lookup.
 - `src/safety_rating.py` — live NHTSA crash-test rating lookup.
@@ -42,7 +42,6 @@ Safety ratings are looked up live against NHTSA's public API at query time - no 
 - `agent/streamlit_app.py` — demo UI (Streamlit).
 - `agent/pages/1_Evaluations.py` — eval suite UI (Streamlit multipage nav).
 - `evals/` — Week 4 eval suite: `cases.py` (test cases), `checks.py` (code-based assertions), `run_evals.py` (runner), `results/*.json` (saved runs), `taxonomy.md` (failure taxonomy).
-- `chroma_db/` — persistent Chroma store. Tracked in git so a fresh deployment (e.g. Render) has the complaint data without re-running ingestion.
 
 ## Week 4: evals
 
@@ -74,5 +73,5 @@ The agent's own hard rules (never answer from training knowledge, injection hand
 
 - Build command: `pip install uv && uv sync`
 - Start command: `uv run streamlit run agent/streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true`
-- Env vars: `OPENAI_API_KEY`, `DATABASE_URL` (from an attached Render Postgres instance)
+- Env vars: `OPENAI_API_KEY`, `PINECONE_API_KEY`, `DATABASE_URL` (from an attached Render Postgres instance)
 - Live URL: _TODO once deployed_

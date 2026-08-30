@@ -1,13 +1,24 @@
-import chromadb
 import pandas as pd
-from chromadb.utils import embedding_functions
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from openai import OpenAI
+from pinecone import Pinecone, ServerlessSpec
 
-from config import CHROMA_DB_DIR, EMBEDDING_MODEL, NHTSA_COMPLAINTS_DIR, OPENAI_API_KEY, VEHICLE_SHORTLIST
+from config import (
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MODEL,
+    NHTSA_COMPLAINTS_DIR,
+    OPENAI_API_KEY,
+    PINECONE_API_KEY,
+    PINECONE_INDEX_NAME,
+    VEHICLE_SHORTLIST,
+)
 
 COMPLAINTS_CSV = NHTSA_COMPLAINTS_DIR / "complaints.csv"
-COLLECTION_NAME = "nhtsa_complaints"
 UPSERT_BATCH_SIZE = 100
+# Metadata carries the narrative text itself (Pinecone doesn't store separate
+# "documents" the way Chroma does) - each chunk is well under this per-vector
+# metadata cap.
+NARRATIVE_METADATA_KEY = "narrative"
 
 NHTSA_COLUMNS = [
     "odiNumber",
@@ -101,43 +112,58 @@ def chunk_complaints(df: pd.DataFrame) -> list[dict]:
                 {
                     "id": doc_id,
                     "text": text,
-                    "metadata": {**metadata_base, "chunk_index": i, "chunk_count": len(texts)},
+                    "metadata": {
+                        **metadata_base,
+                        "chunk_index": i,
+                        "chunk_count": len(texts),
+                        NARRATIVE_METADATA_KEY: text,
+                    },
                 }
             )
 
     return chunks
 
 
-def get_collection():
-    client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
-    embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-        api_key=OPENAI_API_KEY,
-        model_name=EMBEDDING_MODEL,
-    )
-    return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=embedding_fn)
+def get_index():
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    if not pc.has_index(PINECONE_INDEX_NAME):
+        pc.create_index(
+            name=PINECONE_INDEX_NAME,
+            dimension=EMBEDDING_DIMENSION,
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+        )
+    return pc.Index(PINECONE_INDEX_NAME)
 
 
 def _clean_metadata(metadata: dict) -> dict:
     return {k: v for k, v in metadata.items() if v is not None}
 
 
-def embed_and_upsert(chunks: list[dict], collection) -> None:
-    existing_complaint_ids = {m["complaint_id"] for m in collection.get(include=["metadatas"])["metadatas"]}
+def embed_and_upsert(chunks: list[dict], index) -> None:
+    # Pinecone upserts are idempotent by id, so re-running ingestion simply
+    # overwrites existing vectors rather than needing an existence check -
+    # unlike Chroma, there's no cheap way to list all stored ids up front.
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-    pending = [c for c in chunks if c["metadata"]["complaint_id"] not in existing_complaint_ids]
-    skipped = len(chunks) - len(pending)
-
-    for start in range(0, len(pending), UPSERT_BATCH_SIZE):
-        batch = pending[start : start + UPSERT_BATCH_SIZE]
-        collection.add(
-            ids=[c["id"] for c in batch],
-            documents=[c["text"] for c in batch],
-            metadatas=[_clean_metadata(c["metadata"]) for c in batch],
+    for start in range(0, len(chunks), UPSERT_BATCH_SIZE):
+        batch = chunks[start : start + UPSERT_BATCH_SIZE]
+        embeddings = openai_client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=[c["text"] for c in batch],
         )
-        print(f"  Embedded and inserted batch {start // UPSERT_BATCH_SIZE + 1}: {len(batch)} chunks")
+        vectors = [
+            {
+                "id": c["id"],
+                "values": embedding.embedding,
+                "metadata": _clean_metadata(c["metadata"]),
+            }
+            for c, embedding in zip(batch, embeddings.data)
+        ]
+        index.upsert(vectors=vectors)
+        print(f"  Embedded and upserted batch {start // UPSERT_BATCH_SIZE + 1}: {len(batch)} chunks")
 
-    print(f"\nSkipped (complaint_id already in collection): {skipped}")
-    print(f"Newly embedded and inserted: {len(pending)}")
+    print(f"\nUpserted: {len(chunks)} chunks")
 
 
 def main():
@@ -146,10 +172,11 @@ def main():
     print(f"\nTotal chunks to consider: {len(chunks)}")
     print(f"Example metadata: {chunks[0]['metadata']}")
 
-    collection = get_collection()
-    embed_and_upsert(chunks, collection)
+    index = get_index()
+    embed_and_upsert(chunks, index)
 
-    print(f"\nTotal documents in '{COLLECTION_NAME}' collection: {collection.count()}")
+    stats = index.describe_index_stats()
+    print(f"\nTotal vectors in '{PINECONE_INDEX_NAME}' index: {stats['total_vector_count']}")
 
 
 if __name__ == "__main__":
