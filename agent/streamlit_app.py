@@ -435,40 +435,51 @@ with tab_compare:
         # two never disagree.
         scores = [_rank_score(e.tiles()) if e.tiles() else None for e in ranked]
         best_score = scores[0] if scores and scores[0] is not None else None
+        # The worst-signal-wins verdict badge (below, per card) is
+        # deliberately conservative - reliability is never "green" - so on
+        # its own almost every listing reads as the same amber "worth a
+        # closer look", which doesn't tell listings apart. The border color
+        # is what should actually say "choose this one" vs "maybe not this
+        # one": gold for the top score, red for the strictly-lowest score
+        # (only when it's really behind the best, not just tied). Anyone in
+        # between keeps the default glass border - correctly reading as "no
+        # strong opinion".
+        is_lowest_flags = [
+            i == len(ranked) - 1 and scores[i] is not None
+            and best_score is not None and scores[i] < best_score
+            for i in range(len(ranked))
+        ]
+        border_overrides = []
+        for i, entry in enumerate(ranked):
+            if not (entry.tiles() and rank_eligible > 1):
+                continue
+            if i == 0:
+                border_overrides.append((entry.id, CARD_BORDER_RECOMMENDED))
+            elif is_lowest_flags[i]:
+                border_overrides.append((entry.id, CARD_BORDER_LOWEST))
+        # One combined <style> block for every card that needs a border
+        # override, injected once, outside the column loop entirely - an
+        # earlier version injected one st.markdown() per qualifying card,
+        # from inside its own column. Each of those calls became its own
+        # invisible block element, and Streamlit's default inter-element
+        # spacing around that block pushed the actual card (rendered right
+        # after it) down by ~16px relative to cards with no override - a
+        # real, measured misalignment (confirmed via getBoundingClientRect:
+        # the recommended card's top sat 16px below its row neighbors),
+        # not just a cosmetic nit.
+        if border_overrides:
+            rules = "".join(
+                f".st-key-card_{card_id} {{ border-color: {color} !important; border-width: 2px !important; }}"
+                for card_id, color in border_overrides
+            )
+            st.markdown(f"<style>{rules}</style>", unsafe_allow_html=True)
         st.markdown(DARK_CARD_CSS, unsafe_allow_html=True)
         compare_cols = st.columns(3)
         for i, entry in enumerate(ranked):
             tiles = entry.tiles()
             score = scores[i]
-            # The worst-signal-wins verdict badge (below) is deliberately
-            # conservative - reliability is never "green" - so on its own
-            # almost every listing reads as the same amber "worth a closer
-            # look", which doesn't tell listings apart. The border color is
-            # what should actually say "choose this one" vs "maybe not this
-            # one": gold for the top score, red for the strictly-lowest
-            # score (only when it's really behind the best, not just tied).
-            # Anyone in between keeps the default glass border - correctly
-            # reading as "no strong opinion".
-            is_lowest = (
-                i == len(ranked) - 1 and score is not None
-                and best_score is not None and score < best_score
-            )
-            border_color = None
-            if tiles and rank_eligible > 1:
-                if i == 0:
-                    border_color = CARD_BORDER_RECOMMENDED
-                elif is_lowest:
-                    border_color = CARD_BORDER_LOWEST
+            is_lowest = is_lowest_flags[i]
             with compare_cols[i % 3]:
-                if border_color:
-                    # DARK_CARD_CSS above styles every card the same way via
-                    # a wildcard selector - this per-card block only needs
-                    # to override the one thing that differs card to card.
-                    st.markdown(
-                        f"<style>.st-key-card_{entry.id} {{ border-color: {border_color} !important; "
-                        f"border-width: 2px !important; }}</style>",
-                        unsafe_allow_html=True,
-                    )
                 with st.container(border=True, key=f"card_{entry.id}"):
                     image_path = _vehicle_image_path(entry.make, entry.model)
                     if image_path:
