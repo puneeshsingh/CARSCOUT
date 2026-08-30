@@ -229,7 +229,7 @@ st.logo(str(LOGO_PATH), size="large", icon_image=str(LOGO_PATH))
 
 col_logo, col_title = st.columns([1, 8], vertical_alignment="center")
 with col_logo:
-    st.image(str(LOGO_PATH), width=72)
+    st.image(str(LOGO_PATH), width=90)
 with col_title:
     st.title("CarScout — A Deep Agent for Used-Car Due Diligence")
     st.caption(
