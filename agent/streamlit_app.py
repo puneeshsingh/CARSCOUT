@@ -7,6 +7,7 @@ renders the Think -> Act -> Observe trace plus token cost.
 For the bootcamp cohort demo. Not polished, not for production use.
 """
 
+import re
 import sys
 from datetime import timezone
 from pathlib import Path
@@ -37,6 +38,39 @@ TILE_TITLES = {
 # success are Streamlit's own semantic red/amber/green containers, so this
 # reuses native theming instead of hand-rolled colored HTML.
 TILE_RENDERERS = {"red": st.error, "amber": st.warning, "green": st.success}
+# One Material icon per signal (Streamlit's built-in `:material/name:`
+# syntax) so each tile reads as its own category at a glance, not just a
+# colored box of text.
+TILE_ICONS = {
+    "reliability": ":material/build:",
+    "price": ":material/sell:",
+    "recalls": ":material/campaign:",
+    "safety": ":material/shield:",
+}
+# Points per tile color, used to rank evaluated listings best-first in the
+# comparison grid - not shown to the user as raw numbers, just the sort key.
+_RANK_POINTS = {"green": 2, "amber": 1, "red": 0}
+
+_STAR_HEADLINE_RE = re.compile(r"^(\d)-star overall rating$")
+
+
+def _starred_headline(headline: str) -> str:
+    """Turns "5-star overall rating" into "★★★★★ (5-star overall rating)"
+    - real stars, not just a number, for the one tile where a star rating
+    is the natural unit. Falls back to the plain headline untouched for
+    anything that doesn't match (no rating on file, unparsed, etc.)."""
+    match = _STAR_HEADLINE_RE.match(headline)
+    if not match:
+        return headline
+    stars = int(match.group(1))
+    return f"{'★' * stars}{'☆' * (5 - stars)}  ({headline})"
+
+
+def _rank_score(tiles: dict) -> int:
+    """Higher = a better-looking listing overall - green tiles score more
+    than amber, amber more than red. Used only to sort the comparison grid
+    best-first; the raw score itself is never shown to the user."""
+    return sum(_RANK_POINTS.get(t.get("color"), 0) for t in tiles.values())
 
 # Live status-box labels, keyed by tool name, shown as each tool is called
 # (see run_with_progress's on_event callback below) - real-time progress
@@ -286,8 +320,9 @@ with tab_run:
         tile_cols = st.columns(4)
         for col, (signal, title) in zip(tile_cols, TILE_TITLES.items()):
             tile = trace["tiles"].get(signal, {"color": "amber", "headline": "No data"})
+            headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
             with col:
-                TILE_RENDERERS[tile["color"]](f"**{title}**\n\n{tile['headline']}")
+                TILE_RENDERERS[tile["color"]](f"**{title}**\n\n{headline}", icon=TILE_ICONS[signal])
 
         st.subheader("Final answer")
         TILE_RENDERERS[_overall_color(trace["tiles"])](_escape_for_markdown(final_answer))
@@ -302,6 +337,7 @@ with tab_run:
             data=pdf_bytes,
             file_name=f"carscout_{make}_{vehicle_model}_{year}.pdf".replace(" ", "_"),
             mime="application/pdf",
+            type="primary", icon=":material/download:",
         )
 
         with st.expander("Show technical trace (Think → Act → Observe)", expanded=False):
@@ -335,13 +371,36 @@ with tab_compare:
     elif not recent:
         st.write("No searches yet - run a check in the other tab first.")
     else:
-        st.caption(f"{len(recent)} evaluated listing(s) for {user_name}, most recent first.")
+        # Best-first, not just most-recent-first, so the comparison actually
+        # ranks the listings - a green-heavy report leads, red-heavy trails.
+        # Entries saved before tile classification existed (score -1) always
+        # sort last, since there's nothing to rank them on.
+        ranked = sorted(
+            recent,
+            key=lambda e: _rank_score(e.tiles()) if e.tiles() else -1,
+            reverse=True,
+        )
+        rank_eligible = sum(1 for e in ranked if e.tiles())
+        st.caption(
+            f"{len(recent)} evaluated listing(s) for {user_name}, best overall result first."
+        )
         compare_cols = st.columns(3)
-        for i, entry in enumerate(recent):
+        for i, entry in enumerate(ranked):
             tiles = entry.tiles()
-            color = _overall_color(tiles) if tiles else "amber"
             with compare_cols[i % 3]:
                 with st.container(border=True):
+                    if tiles and rank_eligible > 1:
+                        if i == 0:
+                            st.badge("Best of your evaluated listings", icon=":material/military_tech:", color="green")
+                        else:
+                            st.badge(f"#{i + 1} of your evaluated listings", icon=":material/star:", color="blue")
+                    if tiles:
+                        verdict_badge = {
+                            "red": ("Needs caution", ":material/warning:", "red"),
+                            "amber": ("Worth a closer look", ":material/visibility:", "orange"),
+                            "green": ("Looks solid", ":material/thumb_up:", "green"),
+                        }[_overall_color(tiles)]
+                        st.badge(verdict_badge[0], icon=verdict_badge[1], color=verdict_badge[2])
                     st.markdown(f"**{entry.year} {entry.make} {entry.model}**")
                     st.caption(
                         f"{entry.symptom} · ${entry.asking_price:,.0f} / {entry.odometer:,} mi · "
@@ -350,7 +409,8 @@ with tab_compare:
                     if tiles:
                         for signal, title in TILE_TITLES.items():
                             tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
-                            TILE_RENDERERS[tile["color"]](f"{title}: {tile['headline']}")
+                            headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
+                            TILE_RENDERERS[tile["color"]](f"{title}: {headline}", icon=TILE_ICONS[signal])
                     else:
                         # Saved before tile classification existed - no
                         # per-signal colors to show, just the plain text.
@@ -374,8 +434,12 @@ with tab_compare:
                         "Download PDF", data=pdf_bytes,
                         file_name=f"carscout_{entry.make}_{entry.model}_{entry.year}.pdf".replace(" ", "_"),
                         mime="application/pdf", key=f"pdf_{entry.id}",
+                        type="primary", icon=":material/download:", use_container_width=True,
                     )
-                    if st.button("Use this search", key=f"reuse_{entry.id}"):
+                    if st.button(
+                        "Use this search", key=f"reuse_{entry.id}",
+                        icon=":material/replay:", use_container_width=True,
+                    ):
                         label = VIN_LABEL_BY_MAKE_MODEL.get((entry.make, entry.model), VIN_LABELS[0])
                         st.session_state["form_vin_label"] = label
                         st.session_state["form_symptom"] = entry.symptom
