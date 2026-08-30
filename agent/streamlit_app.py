@@ -72,20 +72,24 @@ def _starred_headline(headline: str) -> str:
 
 
 # Comparison-grid cards render on a dark gradient (DARK_CARD_CSS below), not
-# white - a per-signal tile tinted with its own severity color (a past
-# version of this) reads fine on white but camouflages on a dark background
-# just as badly as it did on a green-tinted one. These stay a flat
-# translucent "glass" tile with the severity color shown only as a border
-# accent - readable regardless of what's behind them. Plain Unicode icons
-# rather than Streamlit's `:material/` ligature syntax, since that only
-# resolves inside native st.* calls, not raw HTML. Every value interpolated
-# in here comes from classify_tiles()'s fixed headline templates
-# (TILE_TITLES keys, signal counts, star ratings) - never free-text user
-# input - so this is safe to render as raw HTML.
+# white - a per-signal tile tinted with its own severity color at FULL
+# opacity (a past version of this) reads fine on white but camouflages
+# white text on a dark background just as badly as it did on a green-tinted
+# one, since these accent colors are themselves light/pastel. A border-only
+# accent (an even earlier version of this fix) went too far the other way -
+# too subtle to read as "colored" at a glance. `fill` is the same accent at
+# low opacity over the dark card background - light enough that the base
+# stays dark (white text keeps its contrast), saturated enough that the
+# tile genuinely reads as red/amber/green, not just a thin outline. Plain
+# Unicode icons rather than Streamlit's `:material/` ligature syntax, since
+# that only resolves inside native st.* calls, not raw HTML. Every value
+# interpolated in here comes from classify_tiles()'s fixed headline
+# templates (TILE_TITLES keys, signal counts, star ratings) - never
+# free-text user input - so this is safe to render as raw HTML.
 _CHIP_COLORS = {
-    "red": {"accent": "#f87171", "glow": "rgba(248,113,113,0.65)"},
-    "amber": {"accent": "#fbbf24", "glow": "rgba(251,191,36,0.65)"},
-    "green": {"accent": "#4ade80", "glow": "rgba(74,222,128,0.7)"},
+    "red": {"accent": "#f87171", "glow": "rgba(248,113,113,0.65)", "fill": "rgba(248,113,113,0.28)"},
+    "amber": {"accent": "#fbbf24", "glow": "rgba(251,191,36,0.65)", "fill": "rgba(251,191,36,0.26)"},
+    "green": {"accent": "#4ade80", "glow": "rgba(74,222,128,0.7)", "fill": "rgba(74,222,128,0.26)"},
 }
 SIGNAL_EMOJI = {"reliability": "🔧", "price": "🏷️", "recalls": "📢", "safety": "🛡️"}
 
@@ -101,7 +105,7 @@ def _signal_squares_html(tiles: dict) -> str:
     for signal, title in TILE_TITLES.items():
         tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
         headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
-        accent = _CHIP_COLORS[tile["color"]]["accent"]
+        chip = _CHIP_COLORS[tile["color"]]
         # title/headline are always fixed templates or counts/stars from
         # classify_tiles(), never free text - escaping isn't fixing a live
         # bug, just cheap insurance against that invariant changing later.
@@ -109,12 +113,12 @@ def _signal_squares_html(tiles: dict) -> str:
         cells.append(
             f'<div title="{safe_title}: {safe_headline}" style="display:flex;flex-direction:column;'
             f'gap:6px;height:96px;box-sizing:border-box;padding:14px 16px;border-radius:12px;'
-            f'background:rgba(255,255,255,0.07);border:1px solid {accent};overflow:hidden;">'
+            f'background:{chip["fill"]};border:1px solid {chip["accent"]};overflow:hidden;">'
             f'<div style="display:flex;align-items:center;gap:7px;">'
             f'<span style="font-size:15px;line-height:1;">{SIGNAL_EMOJI[signal]}</span>'
             f'<span style="font-size:13.5px;font-weight:700;line-height:1.2;color:#ffffff;">{safe_title}</span>'
             f"</div>"
-            f'<span style="font-size:12.5px;line-height:1.4;color:rgba(255,255,255,0.72);'
+            f'<span style="font-size:12.5px;line-height:1.4;color:rgba(255,255,255,0.88);'
             f'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">'
             f"{safe_headline}</span>"
             f"</div>"
@@ -254,9 +258,33 @@ DARK_CARD_CSS = """<style>
 
 def _rank_score(tiles: dict) -> int:
     """Higher = a better-looking listing overall - green tiles score more
-    than amber, amber more than red. Used only to sort the comparison grid
-    best-first; the raw score itself is never shown to the user."""
+    than amber, amber more than red. Sorts the comparison grid best-first;
+    also shown to the user directly as "X/MAX signals positive" on each
+    card's progress bar."""
     return sum(_RANK_POINTS.get(t.get("color"), 0) for t in tiles.values())
+
+
+def _score_color(score: int) -> str:
+    """Buckets a rank score into the same red/amber/green language as the
+    tiles, by the same fraction the progress bar already renders as its
+    fill width - so the bar's color is always describing the exact number
+    printed on it ("X/MAX signals positive"), not a separate signal. Two
+    different scores (5/8 vs 6/8) crossing a bucket boundary now visibly
+    differ in color, not just in bar length - before this, the bar's color
+    came from the worst-signal-wins verdict instead (_overall_color()),
+    which collapses almost every real listing into the same amber bucket
+    here (reliability is deliberately never green - see _overall_color's
+    docstring), so most cards looked identical regardless of their actual
+    score. That verdict is still the right signal for the badge text right
+    above the bar (one red tile should read as "needs caution" no matter
+    how good the other three are) - it's just the wrong signal for a bar
+    whose whole job is to visualize this specific number."""
+    fraction = score / MAX_RANK_SCORE
+    if fraction >= 0.75:
+        return "green"
+    if fraction >= 0.5:
+        return "amber"
+    return "red"
 
 # Live status-box labels, keyed by tool name, shown as each tool is called
 # (see run_with_progress's on_event callback below) - real-time progress
@@ -722,11 +750,12 @@ with tab_compare:
             for i in range(len(ranked))
         ]
         border_overrides = []
-        # The progress bar's fill color, per card - reuses the exact same
-        # worst-signal-wins _overall_color() the verdict badge already uses,
-        # so the bar's color always means the same thing the badge text
-        # says right above it ("Looks solid" = green bar, "Needs caution" =
-        # red bar) instead of a decorative gradient with no real meaning.
+        # The progress bar's fill color, per card - bucketed from the same
+        # score/MAX_RANK_SCORE fraction that already sets the bar's fill
+        # width (see _score_color), so the color is always describing the
+        # exact "X/MAX signals positive" number printed on the bar, not a
+        # separate, coarser verdict that collapses most real listings into
+        # one color regardless of score.
         progress_overrides = []
         # Single source of truth for each listing's rank label - used both
         # for the card badge below and passed into the comparison chat, so
@@ -744,7 +773,7 @@ with tab_compare:
         for i, entry in enumerate(ranked):
             tiles = entry.tiles()
             if tiles:
-                progress_overrides.append((entry.id, _CHIP_COLORS[_overall_color(tiles)]))
+                progress_overrides.append((entry.id, _CHIP_COLORS[_score_color(scores[i])]))
             if not (tiles and rank_eligible > 1):
                 continue
             if i == 0:
