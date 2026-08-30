@@ -179,6 +179,15 @@ DARK_CARD_CSS = """<style>
     background: rgba(255,255,255,0.15); color: #ffffff; font-size: 13px; font-weight: 600;
     padding: 8px 16px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px;
 }
+.dark-badge-red {
+    /* Solid, not translucent glass - the lowest-ranked pick should read as
+       an actual alert, not just another neutral pill the same weight as
+       "#4 of your evaluated listings". Same deep red as CARD_BORDER_LOWEST
+       so the badge and the card's own red border always agree. */
+    background: linear-gradient(90deg,#e03131,#a61b1b); color: #ffffff;
+    font-size: 13px; font-weight: 700; padding: 8px 16px; border-radius: 20px;
+    display: inline-flex; align-items: center; gap: 7px;
+}
 .dark-title { color: #ffffff; font-size: 21px; font-weight: 700; margin: 4px 18px 6px; }
 .dark-price-row {
     display: flex; gap: 12px; align-items: center; color: #ffffff; font-weight: 700;
@@ -833,7 +842,7 @@ with tab_compare:
 
                     badges = []
                     if entry.id in rank_labels:
-                        badge_class = "dark-badge-gold" if i == 0 else "dark-badge-glass"
+                        badge_class = "dark-badge-gold" if i == 0 else ("dark-badge-red" if is_lowest else "dark-badge-glass")
                         badge_icon = "🏆" if i == 0 else ("⚠️" if is_lowest else "☆")
                         badges.append(f'<span class="{badge_class}">{badge_icon} {rank_labels[entry.id]}</span>')
                     if tiles:
