@@ -100,8 +100,14 @@ def _signal_squares_html(tiles: dict) -> str:
     single HTML block - a CSS grid is what actually guarantees identical
     cell sizes regardless of headline length, which four separate Streamlit
     widgets never would. Headline text that's too long to fit is clamped to
-    2 lines with an ellipsis; the full text is still available as a native
-    hover tooltip and, always, in "View full report" below."""
+    3 lines with an ellipsis; the full text is still available as a native
+    hover tooltip and, always, in "View full report" below.
+
+    Deliberately opaque white, not a tint of the tile's own severity color:
+    the whole card can also be tinted green/red (see the recommend/avoid
+    logic below), and a light-green tile on a light-green card background
+    was reading as no tile at all. The severity color still shows, just as
+    a solid border instead of a fill - readable against any card color."""
     cells = []
     for signal, title in TILE_TITLES.items():
         tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
@@ -109,13 +115,14 @@ def _signal_squares_html(tiles: dict) -> str:
         style = _CHIP_COLORS[tile["color"]]
         cells.append(
             f'<div title="{title}: {headline}" style="display:flex;flex-direction:column;'
-            f'align-items:center;justify-content:center;text-align:center;gap:2px;height:84px;'
-            f'padding:6px;border-radius:8px;background:{style["bg"]};'
-            f'border:1px solid {style["accent"]};overflow:hidden;">'
+            f'gap:3px;height:104px;padding:8px 10px;border-radius:8px;'
+            f'background:rgba(255,255,255,0.92);border:2px solid {style["accent"]};overflow:hidden;">'
+            f'<div style="display:flex;align-items:center;gap:5px;">'
             f'<span style="font-size:16px;line-height:1;">{SIGNAL_EMOJI[signal]}</span>'
-            f'<span style="font-size:11px;font-weight:600;line-height:1.2;">{title}</span>'
-            f'<span style="font-size:10.5px;line-height:1.25;display:-webkit-box;'
-            f'-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{headline}</span>'
+            f'<span style="font-size:12.5px;font-weight:700;line-height:1.2;color:#1a1a2e;">{title}</span>'
+            f"</div>"
+            f'<span style="font-size:12px;line-height:1.35;color:#333333;display:-webkit-box;'
+            f'-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">{headline}</span>'
             f"</div>"
         )
     return (
@@ -417,7 +424,13 @@ with tab_compare:
                             text=f"{score}/{MAX_RANK_SCORE} signals positive",
                         )
                     st.markdown(f"**{entry.year} {entry.make} {entry.model}**")
-                    st.caption(
+                    # st.caption's muted secondary-gray color was hard to
+                    # read against the card's own colored tint - st.markdown
+                    # renders the same way st.caption already did (both are
+                    # Streamlit's markdown renderer; no unsafe_allow_html
+                    # here, so entry.symptom can't inject raw HTML either
+                    # way), just at normal-contrast body-text size/color.
+                    st.markdown(
                         f"{entry.symptom} · ${entry.asking_price:,.0f} / {entry.odometer:,} mi · "
                         f"{_format_pacific(entry.created_at)}"
                     )
