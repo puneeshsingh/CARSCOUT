@@ -11,6 +11,7 @@ dependencies = [
     "langchain-openai>=1.5.1",
     "langchain-text-splitters>=1.1.2",
     "langgraph-cli[inmem]>=0.4.31",
+    "mcp>=1.29.0,<2",
     "openai>=3.1.0",
     "pandas>=3.0.5",
     "pinecone>=9.1.0",

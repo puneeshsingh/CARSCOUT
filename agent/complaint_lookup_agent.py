@@ -37,9 +37,10 @@ if sys.platform == "win32":
 
 from deepagents import create_deep_agent
 from langchain_core.messages import AIMessage, ToolMessage
-from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
 from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphRecursionError
+from mcp.shared.memory import create_connected_server_and_client_session
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("complaint_lookup")
@@ -58,55 +59,19 @@ INPUT_PRICE_PER_1M_TOKENS = 0.15
 OUTPUT_PRICE_PER_1M_TOKENS = 0.60
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# sys.executable is the interpreter already running this process, so the MCP
-# server subprocess inherits the same venv/deps on any OS (Windows uses
-# .venv/Scripts/python.exe, Linux uses .venv/bin/python - hardcoding either
-# breaks the other).
-CARSCOUT_SERVER_PYTHON = sys.executable
-CARSCOUT_SERVER_SCRIPT = PROJECT_ROOT / "mcp_server" / "server.py"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-if sys.platform == "win32":
-    import mcp.client.stdio as _mcp_stdio
-
-    _original_get_windows_executable_command = _mcp_stdio.get_windows_executable_command
-
-    def _get_windows_executable_command_fast(command: str) -> str:
-        # On every tool call, the MCP stdio client re-resolves the
-        # interpreter via shutil.which(), which calls the synchronous
-        # os.access() - `langgraph dev` (Windows only) flags this as a
-        # blocking call inside the event loop. command is always our own
-        # absolute sys.executable here, so the which() lookup (a PATH search
-        # + permission probe) is unneeded; os.path.isabs is a pure string
-        # check, not a syscall, so it doesn't trip the same detector.
-        if os.path.isabs(command):
-            return command
-        return _original_get_windows_executable_command(command)
-
-    _mcp_stdio.get_windows_executable_command = _get_windows_executable_command_fast
-
-client = MultiServerMCPClient(
-    {
-        "carscout_retrieval": {
-            "command": str(CARSCOUT_SERVER_PYTHON),
-            "args": [str(CARSCOUT_SERVER_SCRIPT)],
-            "transport": "stdio",
-            # MCP stdio transport only inherits a safe env allowlist (PATH,
-            # HOME, etc.) by default, not OPENAI_API_KEY - the subprocess
-            # needs it explicitly, especially where there's no .env file for
-            # it to load on its own (e.g. Render, where the key comes from a
-            # dashboard-set env var on the parent process only).
-            "env": dict(os.environ),
-        },
-    }
-)
+# The real, live MCP server (mcp_server/server.py) - imported directly rather
+# than spawned as a subprocess. A subprocess was a second full Python
+# process duplicating the whole interpreter + dependency footprint (this is
+# what OOM-crashed Render's 512MB free tier); connecting to the same FastMCP
+# object over an in-memory session (below) keeps genuine MCP protocol
+# semantics - real tool discovery, real request/response messages - without
+# a second process.
+from mcp_server.server import mcp as mcp_server_app  # noqa: E402  (needs PROJECT_ROOT on sys.path first)
 
 REQUIRED_TOOL_NAMES = {"search_complaints", "check_price_estimate", "check_recalls", "check_safety_rating"}
-
-_all_tools = asyncio.run(client.get_tools())
-tools = [t for t in _all_tools if t.name in REQUIRED_TOOL_NAMES]
-_missing_tools = REQUIRED_TOOL_NAMES - {t.name for t in tools}
-if _missing_tools:
-    raise RuntimeError(f"Required tool(s) not found on carscout_retrieval MCP server: {sorted(_missing_tools)}")
 
 SYSTEM_PROMPT = """You are a single-purpose used-car due-diligence agent.
 
@@ -262,12 +227,6 @@ sections, and the closing note - nothing else.
 
 model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-agent = create_deep_agent(
-    model=model,
-    tools=tools,
-    system_prompt=SYSTEM_PROMPT,
-)
-
 
 def _format_no_confident_match_answer(
     make: str,
@@ -401,69 +360,81 @@ async def _stream_events(
     price_check_result: dict | None = None
 
     try:
-        async for step in agent.astream(
-            {"messages": [{"role": "user", "content": user_msg}]},
-            config={"recursion_limit": MAX_STEPS},
-            stream_mode="updates",
-        ):
-            for node_name, update in step.items():
-                if not isinstance(update, dict) or "messages" not in update:
-                    continue
-                yield ("node", {"name": node_name})
-                for msg in update["messages"]:
-                    if isinstance(msg, AIMessage):
-                        if msg.tool_calls:
-                            for call in msg.tool_calls:
-                                yield ("act", {"tool": call["name"], "args": call["args"]})
-                                if call["name"] == "search_complaints":
-                                    query = call["args"].get("query")
-                                    if query:
-                                        queries_tried.append(query)
-                        elif msg.content:
-                            yield ("think", {"text": msg.content})
-                        if msg.usage_metadata:
-                            u = msg.usage_metadata
-                            input_tokens = u.get("input_tokens", 0)
-                            output_tokens = u.get("output_tokens", 0)
-                            total_input_tokens += input_tokens
-                            total_output_tokens += output_tokens
-                            yield ("usage", {"input": input_tokens, "output": output_tokens})
-                        if msg.content and not msg.tool_calls:
-                            final_answer = msg.content
-                    elif isinstance(msg, ToolMessage):
-                        # MCP tool results arrive as a list of content blocks
-                        # (`[{"type": "text", "text": "<json>"}]`); pull the
-                        # raw JSON text out so it stays parseable, instead of
-                        # falling back to Python's list/dict repr.
-                        if isinstance(msg.content, list):
-                            text_parts = [
-                                block.get("text", "")
-                                for block in msg.content
-                                if isinstance(block, dict) and block.get("type") == "text"
-                            ]
-                            content = "\n".join(text_parts) if text_parts else str(msg.content)
-                        elif isinstance(msg.content, str):
-                            content = msg.content
-                        else:
-                            content = str(msg.content)
-                        yield ("observe", {"text": content})
-                        try:
-                            parsed = json.loads(content)
-                        except (json.JSONDecodeError, TypeError):
-                            parsed = None
-                        # ToolMessage.name is the actual originating tool,
-                        # set by LangGraph's ToolNode from the tool_call_id it
-                        # answers - reliable regardless of execution order.
-                        # (Call order != result order: the 4 tools run
-                        # concurrently and finish at very different speeds -
-                        # search_complaints is consistently slowest since it
-                        # needs an embedding call - so a call-order-based FIFO
-                        # silently mismatches results to the wrong tool.)
-                        called_tool = msg.name
-                        if called_tool == "search_complaints" and isinstance(parsed, dict) and "status" in parsed:
-                            search_complaints_result = parsed
-                        elif called_tool == "check_price_estimate" and isinstance(parsed, dict) and "status" in parsed:
-                            price_check_result = parsed
+        # A fresh in-memory MCP session per run - the session (and the tools/
+        # agent bound to it) can't outlive the event loop it was opened on,
+        # and each top-level run() / run_with_trace() call uses its own
+        # asyncio.run() with a fresh loop, so this can't be hoisted to
+        # module level the way the old subprocess client was.
+        async with create_connected_server_and_client_session(mcp_server_app) as session:
+            tools = await load_mcp_tools(session)
+            missing_tools = REQUIRED_TOOL_NAMES - {t.name for t in tools}
+            if missing_tools:
+                raise RuntimeError(f"Required tool(s) not found on carscout_retrieval MCP server: {sorted(missing_tools)}")
+            agent = create_deep_agent(model=model, tools=tools, system_prompt=SYSTEM_PROMPT)
+
+            async for step in agent.astream(
+                {"messages": [{"role": "user", "content": user_msg}]},
+                config={"recursion_limit": MAX_STEPS},
+                stream_mode="updates",
+            ):
+                for node_name, update in step.items():
+                    if not isinstance(update, dict) or "messages" not in update:
+                        continue
+                    yield ("node", {"name": node_name})
+                    for msg in update["messages"]:
+                        if isinstance(msg, AIMessage):
+                            if msg.tool_calls:
+                                for call in msg.tool_calls:
+                                    yield ("act", {"tool": call["name"], "args": call["args"]})
+                                    if call["name"] == "search_complaints":
+                                        query = call["args"].get("query")
+                                        if query:
+                                            queries_tried.append(query)
+                            elif msg.content:
+                                yield ("think", {"text": msg.content})
+                            if msg.usage_metadata:
+                                u = msg.usage_metadata
+                                input_tokens = u.get("input_tokens", 0)
+                                output_tokens = u.get("output_tokens", 0)
+                                total_input_tokens += input_tokens
+                                total_output_tokens += output_tokens
+                                yield ("usage", {"input": input_tokens, "output": output_tokens})
+                            if msg.content and not msg.tool_calls:
+                                final_answer = msg.content
+                        elif isinstance(msg, ToolMessage):
+                            # MCP tool results arrive as a list of content blocks
+                            # (`[{"type": "text", "text": "<json>"}]`); pull the
+                            # raw JSON text out so it stays parseable, instead of
+                            # falling back to Python's list/dict repr.
+                            if isinstance(msg.content, list):
+                                text_parts = [
+                                    block.get("text", "")
+                                    for block in msg.content
+                                    if isinstance(block, dict) and block.get("type") == "text"
+                                ]
+                                content = "\n".join(text_parts) if text_parts else str(msg.content)
+                            elif isinstance(msg.content, str):
+                                content = msg.content
+                            else:
+                                content = str(msg.content)
+                            yield ("observe", {"text": content})
+                            try:
+                                parsed = json.loads(content)
+                            except (json.JSONDecodeError, TypeError):
+                                parsed = None
+                            # ToolMessage.name is the actual originating tool,
+                            # set by LangGraph's ToolNode from the tool_call_id it
+                            # answers - reliable regardless of execution order.
+                            # (Call order != result order: the 4 tools run
+                            # concurrently and finish at very different speeds -
+                            # search_complaints is consistently slowest since it
+                            # needs an embedding call - so a call-order-based FIFO
+                            # silently mismatches results to the wrong tool.)
+                            called_tool = msg.name
+                            if called_tool == "search_complaints" and isinstance(parsed, dict) and "status" in parsed:
+                                search_complaints_result = parsed
+                            elif called_tool == "check_price_estimate" and isinstance(parsed, dict) and "status" in parsed:
+                                price_check_result = parsed
     except GraphRecursionError:
         yield ("capped", {"max_steps": MAX_STEPS})
         final_answer = (

@@ -75,3 +75,5 @@ The agent's own hard rules (never answer from training knowledge, injection hand
 - Start command: `uv run streamlit run agent/streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true`
 - Env vars: `OPENAI_API_KEY`, `PINECONE_API_KEY`, `DATABASE_URL` (from an attached Render Postgres instance)
 - Live URL: _TODO once deployed_
+
+**Fitting inside Render's free 512MB:** the first deploy OOM-crashed on every agent run. Two contributors: (1) Chroma's locally-loaded vector index and its dependency footprint (onnxruntime, tokenizers, etc.) — fixed by migrating to Pinecone, a remote/managed vector store with no local index and a much lighter client; (2) the MCP server was originally spawned as a second full Python subprocess, duplicating the whole interpreter and dependency tree — fixed by connecting to the same `FastMCP` server object over an in-memory session (`mcp.shared.memory.create_connected_server_and_client_session`) instead of a subprocess. This is still genuine MCP protocol traffic (real tool discovery, real request/response messages), just without a second OS process.
