@@ -45,6 +45,7 @@ Each curated VIN is also decoded live against NHTSA's free vPIC API (`src/vin_de
 - `src/ingest_recalls.py` / `src/recall_check.py` — NHTSA recall data caching and recall history lookup.
 - `src/safety_rating.py` — live NHTSA crash-test rating lookup.
 - `src/vin_decode.py` — live VIN decode via NHTSA's vPIC API (see [VIN-based input](#vin-based-input)).
+- `assets/vehicles/` — one photo per shortlist vehicle, shown on the form and in the comparison grid. AI-generated (not sourced from real listings or manufacturer photography), specifically to avoid any question over redistribution rights.
 - `src/memory_store.py` — durable "recent searches" memory store (SQLite/Postgres via SQLAlchemy), scoped by name.
 - `src/report_pdf.py` — builds a downloadable PDF version of a report (`fpdf2`, no system-level dependencies).
 - `mcp_server/server.py` — exposes all four checks as MCP tools.

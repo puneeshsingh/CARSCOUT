@@ -15,6 +15,7 @@ dependencies = [
     "mcp>=1.29.0,<2",
     "openai>=3.1.0",
     "pandas>=3.0.5",
+    "pillow>=12.3.0",
     "pinecone>=9.1.0",
     "psycopg[binary]>=3.2.3",
     "pydantic>=2.13.4",

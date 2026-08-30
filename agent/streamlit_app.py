@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 from dotenv import load_dotenv
+from PIL import Image, ImageOps
 
 load_dotenv()
 
@@ -126,7 +127,7 @@ def _escape_for_markdown(text: str) -> str:
     storing to the DB, so the saved text keeps a real "$"."""
     return text.replace("$", "\\$")
 
-st.set_page_config(page_title="CarScout Due-Diligence Agent", layout="wide")
+st.set_page_config(page_title="CarScout", layout="wide")
 
 
 @st.cache_resource
@@ -149,10 +150,38 @@ VIN_LABELS = [
 ]
 LISTING_BY_VIN_LABEL = dict(zip(VIN_LABELS, VIN_DEMO_LISTINGS))
 
-# A distinct flat color per vehicle for the placeholder car icon - not real
-# photos (avoids any licensing question over manufacturer images), just a
-# simple visual anchor so each listing reads as a distinct "card."
+# A distinct flat color per vehicle for the placeholder car icon - fallback
+# only, for a vehicle that doesn't have a real photo in assets/vehicles/
+# (avoids ever showing a blank space if one goes missing).
 VEHICLE_ICON_COLORS = ["#378ADD", "#1D9E75", "#D85A30", "#D4537E", "#BA7517", "#7F77DD"]
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "vehicles"
+
+
+def _vehicle_image_path(make: str, model: str) -> Path | None:
+    """Real listing photos, supplied by the user (assets/vehicles/, e.g.
+    hyundai_kona.jpg) - not sourced by this app, so there's no licensing
+    question to resolve on our end. Falls back to the SVG icon below for
+    any vehicle without one."""
+    path = ASSETS_DIR / f"{make.lower()}_{model.lower()}.jpg"
+    return path if path.exists() else None
+
+
+@st.cache_data(show_spinner=False)
+def _load_vehicle_image(path_str: str, width: int, height: int) -> Image.Image:
+    """Source photos come in whatever size/aspect ratio was supplied - a
+    mix of dealer-photo and phone-photo dimensions makes cards in the same
+    grid look inconsistent if shown at native size. ImageOps.fit crops to
+    the target aspect ratio (centered) then resizes, so every vehicle
+    renders at the exact same pixel size regardless of its source image."""
+    img = Image.open(path_str).convert("RGB")
+    return ImageOps.fit(img, (width, height), method=Image.LANCZOS)
+
+
+# Target sizes for the two places a vehicle photo appears - the single
+# "Run a new check" preview gets more room than a grid thumbnail does.
+FEATURED_IMAGE_SIZE = (480, 320)
+GRID_IMAGE_SIZE = (320, 220)
 
 
 def _car_icon_svg(color: str) -> str:
@@ -194,42 +223,52 @@ with st.sidebar:
     else:
         st.caption("Enter your name to save and see your own search history under \"Your evaluated listings\".")
 
-st.title("CarScout Due-Diligence Agent")
+st.title("CarScout — A Deep Agent for Used-Car Due Diligence")
 st.caption(
-    "Runs a deepagents agent (GPT-4o-mini + 4 carscout_retrieval MCP tools) against real NHTSA "
-    "and Craigslist data to check reliability complaints, price fairness, recall history, and "
-    "crash-safety rating. The agent is instructed to answer only from tool results, never from "
-    "its own training knowledge."
+    "Checks reliability, price fairness, recalls, and safety for a used-car listing - grounded "
+    "in real NHTSA and Craigslist data, never guessed from training knowledge."
 )
 
 tab_run, tab_compare = st.tabs(["Run a new check", "Your evaluated listings"])
 
 with tab_run:
-    col_icon, col_form = st.columns([1, 5])
+    col_icon, col_form = st.columns([2, 5])
     vehicle_index = VIN_LABELS.index(st.session_state["form_vin_label"])
 
     with col_icon:
-        st.markdown(_car_icon_svg(VEHICLE_ICON_COLORS[vehicle_index]), unsafe_allow_html=True)
+        _preview_listing = VIN_DEMO_LISTINGS[vehicle_index]
+        image_path = _vehicle_image_path(_preview_listing["make"], _preview_listing["model"])
+        if image_path:
+            st.image(_load_vehicle_image(str(image_path), *FEATURED_IMAGE_SIZE))
+        else:
+            st.markdown(_car_icon_svg(VEHICLE_ICON_COLORS[vehicle_index]), unsafe_allow_html=True)
     with col_form:
         selected_label = st.selectbox("Choose a listing (VIN)", VIN_LABELS, key="form_vin_label")
         listing = LISTING_BY_VIN_LABEL[selected_label]
 
     make, vehicle_model, year = listing["make"], listing["model"], listing["year"]
     asking_price, odometer, condition = listing["price"], listing["odometer"], listing["condition"]
-    condition_text = condition or "condition not stated"
+    condition_text = condition or "not stated"
 
     with st.spinner("Decoding VIN..."):
         decoded = vin_decode.decode_vin(listing["vin"])
+    # Two genuinely different sources, kept visually distinct so neither
+    # implies it vouches for the other's data: NHTSA's vPIC API only ever
+    # decodes the vehicle itself (make/model/year) from the VIN - it has no
+    # idea what a listing is asking for it. Price/mileage/condition always
+    # come from the curated listing data, whether or not the live decode
+    # call succeeds.
     if decoded["status"] == "ok":
-        st.caption(
-            f"Decoded live via NHTSA: {decoded['year']} {decoded['make']} {decoded['model']} - "
-            f"${asking_price:,} - {odometer:,} mi - {condition_text}."
+        st.badge(
+            f"VIN decoded live via NHTSA: {decoded['year']} {decoded['make']} {decoded['model']}",
+            icon=":material/verified:", color="green",
         )
     else:
-        st.caption(
-            f"NHTSA decode unavailable right now - using the listing's own data: "
-            f"{year} {make} {vehicle_model} - ${asking_price:,} - {odometer:,} mi - {condition_text}."
-        )
+        st.badge("NHTSA decode unavailable - showing the listing's own vehicle data", icon=":material/error:", color="gray")
+    listing_col1, listing_col2, listing_col3 = st.columns(3)
+    listing_col1.metric("Asking price", f"${asking_price:,.0f}")
+    listing_col2.metric("Odometer", f"{odometer:,} mi")
+    listing_col3.metric("Condition", condition_text.title())
 
     symptom = st.text_input("Symptom / question", key="form_symptom")
 
@@ -376,6 +415,9 @@ with tab_compare:
             tiles = entry.tiles()
             with compare_cols[i % 3]:
                 with st.container(border=True):
+                    image_path = _vehicle_image_path(entry.make, entry.model)
+                    if image_path:
+                        st.image(_load_vehicle_image(str(image_path), *GRID_IMAGE_SIZE), use_container_width=True)
                     if tiles and rank_eligible > 1:
                         if i == 0:
                             st.badge("Best of your evaluated listings", icon=":material/military_tech:", color="green")
