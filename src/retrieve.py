@@ -64,6 +64,9 @@ def search_complaints(
 
     best_score_found = max((c.score for c in candidates), default=None)
     filtered = [c for c in candidates if c.score >= min_score]
+    # candidates is already sorted best-first (Pinecone returns matches in
+    # descending score order), so candidates[0] is the best_score_found owner.
+    closest_candidate = candidates[0] if candidates else None
 
     if filtered:
         top_score = filtered[0].score
@@ -76,6 +79,7 @@ def search_complaints(
             min_score=min_score,
             best_score_found=best_score_found,
             results=filtered,
+            closest_candidate=closest_candidate,
             message=f"Found {len(filtered)} confident match(es) for {make} {model} {year}; top score {top_score:.3f}.",
         )
 
@@ -97,6 +101,7 @@ def search_complaints(
         min_score=min_score,
         best_score_found=best_score_found,
         results=[],
+        closest_candidate=closest_candidate,
         message=message,
     )
 

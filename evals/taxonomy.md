@@ -4,7 +4,7 @@
 
 **How we found these:** rather than guessing what might break and only testing for that, we first read all 18 real answers with fresh eyes and took notes on anything that looked off - *before* looking at what our automated checks said. That order matters: it's how we caught a bug none of our checks were even looking for (#1 below). The raw notes are in `evals/open_coding_notes.md`; how those raw notes got grouped into the categories below is in `evals/axial_coding_notes.md`.
 
-## The 8 things we checked for, ranked by how much they matter
+## The 9 things we checked for, ranked by how much they matter
 
 | # | What we checked | How often it happened | How bad is it (1-5) | Why it's ranked here |
 |---|---|---|---|---|
@@ -16,8 +16,9 @@
 | 6 | The spam/relevance filter blocked or let through the wrong thing | 0 out of 5 | 3 - annoying, not dangerous | All 5 filter tests behaved correctly. |
 | 7 | A raw internal number (like a match score) leaked into the answer | 0 out of 18 | 2 - minor polish issue | Never happened. Lowest priority of the original seven. |
 | 8 | **Prices shown inconsistently (missing "$", or rendered in a code-style font)** | Fixed - confirmed correct in the actual rendered browser output | 4 - looked cosmetic, took four attempts to find the real cause | Found via a user screenshot, not the automated checks - and couldn't have been, since the automated checks only see the raw text, not the rendered page. Real cause: Streamlit's markdown renderer treats "$...$" as LaTeX math, silently swallowing "$" characters from any text with two or more dollar amounts. See the write-up below for the three earlier attempts that didn't address this. |
+| 9 | **The "no clear match" explanation guessed at a reason instead of checking one** | Fixed - confirmed against a real case where the guess was wrong | 3 - misleading, not dangerous | Found by a user questioning the wording directly, not by any automated check. The canned explanation ("simply an edge case not well-represented in the data") was static boilerplate that never looked at what was actually retrieved, so it could - and did - contradict the real data. |
 
-*(Items 1-3 are unchanged from the earlier version of this document. Item 8 is new - the numbering isn't a re-ranking of the original seven, just an addition at the point it was found.)*
+*(Items 1-3 are unchanged from the earlier version of this document. Items 8-9 were added later, at the point each was found - the numbering isn't a re-ranking of the original seven.)*
 
 ## #1: Recall counts were inflated/duplicated (found and fixed)
 
@@ -74,6 +75,18 @@
 **Did it work?** Yes - re-ran the exact case that had failed repeatedly through all three earlier attempts, in the actual browser, and it rendered correctly this time.
 
 *(For engineers: the escape is `_escape_for_markdown()` in `agent/streamlit_app.py`, applied at both render sites - the main answer and the "View full report" expander. The tool_call_id fix from attempt 3 is in `agent/complaint_lookup_agent.py`'s `_stream_events()` (`called_tool = msg.name`) and stays, since it's independently correct. `_apply_deterministic_formatting()` from attempt 2 also stays - it's still useful defense on the underlying text. None of this was caught by `no_code_formatting`/`price_dollar_formatting` in `evals/checks.py`, because those checks run against the raw answer string, the same way `print()` does - the bug only exists in Streamlit's rendered output, a layer the automated suite doesn't see. Worth remembering next time an eval suite says "clean" but a screenshot says otherwise.)*
+
+## #9: The "no clear match" explanation guessed at a reason instead of checking one (found and fixed)
+
+**What happened:** when the reliability search found some complaints but none confidently matched the described symptom, the app said: *"That could mean it's a related but distinct problem, or simply an edge case not well-represented in NHTSA's complaint data."* A user asked why this was shown for a 2021 Kia Forte search on engine stalling, and the answer was uncomfortable: the closest complaint on record (#11456502) reads "Car stalled and shut off while in drive leading it to be towed" - a near-exact match for the question asked. The topic was clearly *not* "an edge case not well-represented in the data." The app just never checked before saying so.
+
+**Why it happened:** the wording was static boilerplate. It ran whenever the search found candidates but none cleared the confidence bar, and it always offered the same two guesses regardless of what those candidates actually said. It sounded like an explanation but was really just a plausible-sounding guess dressed up as one.
+
+**How we fixed it:** the tool that searches complaints now also reports its single closest match, even when that match isn't confident enough to count as a real answer (a new `closest_candidate` field, alongside the existing confident-match list). When that closest match is reasonably close to the confidence bar, the app now quotes it directly - e.g. "the closest report described: '...' - worth being aware of, but not confirmed as the same pattern being asked about here" - instead of guessing why nothing confidently matched. Only when the closest match is genuinely far off (likely unrelated) does the app fall back to a vaguer line, and even that no longer claims anything specific about how well-represented the topic is in the data - it says plainly that it can't tell why nothing matched.
+
+**Did it work?** Yes - re-ran the exact Kia Forte case: the app now quotes complaint #11456502 directly instead of guessing. Also confirmed the fallback path still behaves sensibly on a case where the closest match genuinely was too far off to quote (a different query on the same vehicle scored below the near-miss floor and correctly fell back to the honest, non-specific wording).
+
+*(For engineers: `closest_candidate: ComplaintResult | None` added to `RetrievalResponse` in `src/schemas.py`, populated in `src/retrieve.py`'s `search_complaints()` from the same already-computed candidate list (candidates are already sorted best-first, since Pinecone returns matches in descending score order). Consumed in `agent/complaint_lookup_agent.py`'s `_format_no_confident_match_answer()`, gated on a `NEAR_MISS_MIN_SCORE = 0.55` floor - close enough to the 0.70 confidence threshold to be worth quoting, far enough below it to still be honestly labeled "not a confident match." Not caught by any automated check - this was a wording/honesty issue, not something `no_score_leakage` or any other current check evaluates.)*
 
 ## The other 4 categories: nothing wrong found
 

@@ -1,0 +1,377 @@
+{
+  "timestamp": "2026-08-30T02:48:38.007599+00:00",
+  "num_cases": 3,
+  "check_summary": {
+    "tool_completeness": {
+      "passed": 3,
+      "total": 3,
+      "rate": 1.0
+    },
+    "no_score_leakage": {
+      "passed": 2,
+      "total": 3,
+      "rate": 0.6666666666666666
+    },
+    "recall_framing": {
+      "passed": 3,
+      "total": 3,
+      "rate": 1.0
+    },
+    "no_duplicate_recalls": {
+      "passed": 3,
+      "total": 3,
+      "rate": 1.0
+    },
+    "no_code_formatting": {
+      "passed": 3,
+      "total": 3,
+      "rate": 1.0
+    },
+    "price_dollar_formatting": {
+      "passed": 3,
+      "total": 3,
+      "rate": 1.0
+    },
+    "injection_gate": {
+      "passed": 1,
+      "total": 1,
+      "rate": 1.0
+    }
+  },
+  "overall_pass_rate": 0.9473684210526315,
+  "cases": [
+    {
+      "id": "happy_kona_stalling",
+      "tags": [
+        "happy_path",
+        "golden"
+      ],
+      "checks": [
+        {
+          "name": "tool_completeness",
+          "applicable": true,
+          "passed": true,
+          "detail": "all 4 tools called"
+        },
+        {
+          "name": "no_score_leakage",
+          "applicable": true,
+          "passed": false,
+          "detail": "leaked patterns: ['\\\\bscore\\\\b', '\\\\bconfidence\\\\b']"
+        },
+        {
+          "name": "recall_framing",
+          "applicable": true,
+          "passed": true,
+          "detail": "history framed correctly"
+        },
+        {
+          "name": "no_duplicate_recalls",
+          "applicable": true,
+          "passed": true,
+          "detail": "no duplicate campaigns"
+        },
+        {
+          "name": "no_code_formatting",
+          "applicable": true,
+          "passed": true,
+          "detail": "no backtick/code formatting"
+        },
+        {
+          "name": "price_dollar_formatting",
+          "applicable": true,
+          "passed": true,
+          "detail": "price shown with $ sign (or not mentioned)"
+        }
+      ],
+      "final_answer": "Searched NHTSA complaints for the 2020 Hyundai Kona using \"engine stalling while driving\".\n\nWe found a report that touches on a related symptom for the 2020 Hyundai Kona, but it didn't score confidently enough to call this a clearly documented issue. The closest one (complaint #11427980) described: \"engine recal stall or fire\" - worth being aware of, but not confirmed as the same pattern being asked about here.\n\nVerdict: a related report exists but wasn't a confident match - not a guarantee the vehicle is problem-free, and not a guarantee this is unrelated either.\n\n---\n\nDue-Diligence Report for 2020 Hyundai Kona\n\nQuick verdict: No reliable complaints found | Price: below market | 2 recalls on record | 5-star safety rating\n\n**Reliability**: There were no reliable complaints found specifically related to engine stalling while driving for the 2020 Hyundai Kona. The closest match was a complaint about an engine recal stall or fire (complaint #11427980), but it did not meet the confidence threshold for a definitive reliability issue. This suggests that while there may be some concerns, they are not well-documented or widespread.\n\n**Price Fairness**: The asking price of $16,000 is considered below market for this vehicle. Comparable listings for the 2020 Hyundai Kona with similar mileage average around $17,895, indicating that this listing is priced attractively. However, it's worth investigating why the price is lower than average, as it could signal undisclosed issues.\n\n**Recall History**: There are two recall campaigns on record for the 2020 Hyundai Kona. The first (campaign 20V022000) involved incorrect Gross Axle Weight Rating labels, which could lead to overloading and increase crash risk. The second (campaign 21V301000) pertains to potential engine damage due to improperly heat-treated piston oil rings, which could cause engine stalling and increase fire risk. It's important to verify whether the necessary repairs have been completed on this specific vehicle by checking its VIN.\n\n**Safety Rating**: The 2020 Hyundai Kona received a 5-star overall crash-test rating from NHTSA, indicating excellent safety performance. This rating reflects strong performance in front and side crash tests, with a slightly lower rating of 4 stars for rollover risk.\n\nIn conclusion, I recommend pulling a Carfax or equivalent vehicle history report to check for any accidents, title issues, or odometer discrepancies, as these data sources do not cover such aspects. Additionally, given the recall history and the below-market price, it would be especially prudent to get a pre-purchase inspection (PPI) from an independent mechanic before finalizing the purchase. This small investment can provide significant peace of mind.",
+      "steps": [
+        {
+          "phase": "act",
+          "tool": "search_complaints",
+          "args": {
+            "make": "Hyundai",
+            "model": "Kona",
+            "year": 2020,
+            "query": "engine stalling while driving"
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_price_estimate",
+          "args": {
+            "make": "Hyundai",
+            "model": "Kona",
+            "year": 2020,
+            "odometer": 40000,
+            "asking_price": 16000,
+            "condition": "good"
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_recalls",
+          "args": {
+            "make": "Hyundai",
+            "model": "Kona",
+            "year": 2020
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_safety_rating",
+          "args": {
+            "make": "Hyundai",
+            "model": "Kona",
+            "year": 2020
+          }
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"no_confident_match\",\n  \"query\": \"engine stalling while driving\",\n  \"make\": \"Hyundai\",\n  \"model\": \"Kona\",\n  \"year\": 2020,\n  \"min_score\": 0.7,\n  \"best_score_found\": 0.679164886,\n  \"results\": [],\n  \"closest_candidate\": {\n    \"complaint_id\": \"11427980\",\n    \"score\": 0.679164886,\n    \"make\": \"HYUNDAI\",\n    \"model\": \"KONA\",\n    \"year\": 2020,\n    \"narrative\": \"engine recal stall or fire\"\n  },\n  \"message\": \"No result met the 0.70 similarity threshold (best score found: 0.679). Likely a typo, an unrelated query, or no complaints on this topic for this vehicle.\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"ok\",\n  \"make\": \"Hyundai\",\n  \"model\": \"Kona\",\n  \"year\": 2020,\n  \"asking_price\": 16000.0,\n  \"odometer\": 40000,\n  \"condition\": \"good\",\n  \"sample_size\": 16,\n  \"median_comp_price\": 17895.0,\n  \"p25_comp_price\": 17895.0,\n  \"p75_comp_price\": 19235.0,\n  \"verdict\": \"below_market\",\n  \"message\": \"Found 16 comparable listing(s) for a 2020 Hyundai Kona near 40,000 miles: median $17,895 (range $17,895-$19,235). Asking price $16,000 is below market.\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"ok\",\n  \"make\": \"Hyundai\",\n  \"model\": \"Kona\",\n  \"year\": 2020,\n  \"overall_rating\": \"5\",\n  \"front_crash_rating\": \"5\",\n  \"side_crash_rating\": \"5\",\n  \"rollover_rating\": \"4\",\n  \"vehicle_description\": \"2020 Hyundai Kona SUV AWD\",\n  \"message\": \"NHTSA overall crash-test rating for a 2020 Hyundai Kona: 5/5 stars (rating reflects a representative trim, may vary from the exact one).\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"ok\",\n  \"make\": \"Hyundai\",\n  \"model\": \"Kona\",\n  \"year\": 2020,\n  \"recalls\": [\n    {\n      \"campaign_number\": \"20V022000\",\n      \"component\": \"EQUIPMENT:OTHER:LABELS\",\n      \"summary\": \"Hyundai Motor America (Hyundai) is recalling certain 2020 Kona vehicles.  The certification label may indicate incorrect Gross Axle Weight Rating (GAWR).  As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard (FMVSS) numbers 567, \\\"Certification\\\" and 110, \\\"Tire Selection and Rims.\\\"\",\n      \"consequence\": \"An incorrect GAWR could result in the vehicle being overloaded, increasing the risk of a crash.\",\n      \"remedy\": \"Hyundai will notify owners, and dealers will install new label stickers displaying the correct GAWR over the affected areas of the certification label, free of charge.  The recall began March 2, 2020.  Owners may contact Hyundai customer service at 1-855-371-9460.  Hyundai's number for this recall is 187.\",\n      \"report_received_date\": \"17/01/2020\"\n    },\n    {\n      \"campaign_number\": \"21V301000\",\n      \"component\": \"ENGINE\",\n      \"summary\": \"Hyundai Motor America (Hyundai) is recalling certain 2019-2020 Elantra, 2019-2021 Kona and Veloster vehicles equipped with 2.0L Nu MPI engines.  The piston oil rings may not have been properly heat-treated, which could result in engine damage.\",\n      \"consequence\": \"A damaged engine may stall, increasing the risk of a crash.  In addition, oil may leak onto hot exhaust components, increasing the risk of a fire.\",\n      \"remedy\": \"Dealers will inspect and, if necessary, replace the engine, free of charge.  In addition, Hyundai will deploy Piston Ring Noise Sensing System (PNSS) software.  Owner notification letters were mailed August 24, 2021.  Owners may contact Hyundai customer service at 1-855-371-9460.\",\n      \"report_received_date\": \"28/04/2021\"\n    }\n  ],\n  \"message\": \"Found 2 recall campaign(s) on record for a 2020 Hyundai Kona. This means the manufacturer issued a recall for this model/year - it does NOT mean this specific vehicle's repair is still outstanding, since that depends on its VIN and service history.\"\n}"
+        },
+        {
+          "phase": "think",
+          "text": "Due-Diligence Report for 2020 Hyundai Kona\n\nQuick verdict: No reliable complaints found | Price: below market | 2 recalls on record | 5-star safety rating\n\n**Reliability**: There were no reliable complaints found specifically related to engine stalling while driving for the 2020 Hyundai Kona. The closest match was a complaint about an engine recal stall or fire (complaint #11427980), but it did not meet the confidence threshold for a definitive reliability issue. This suggests that while there may be some concerns, they are not well-documented or widespread.\n\n**Price Fairness**: The asking price of $16,000 is considered below market for this vehicle. Comparable listings for the 2020 Hyundai Kona with similar mileage average around $17,895, indicating that this listing is priced attractively. However, it's worth investigating why the price is lower than average, as it could signal undisclosed issues.\n\n**Recall History**: There are two recall campaigns on record for the 2020 Hyundai Kona. The first (campaign 20V022000) involved incorrect Gross Axle Weight Rating labels, which could lead to overloading and increase crash risk. The second (campaign 21V301000) pertains to potential engine damage due to improperly heat-treated piston oil rings, which could cause engine stalling and increase fire risk. It's important to verify whether the necessary repairs have been completed on this specific vehicle by checking its VIN.\n\n**Safety Rating**: The 2020 Hyundai Kona received a 5-star overall crash-test rating from NHTSA, indicating excellent safety performance. This rating reflects strong performance in front and side crash tests, with a slightly lower rating of 4 stars for rollover risk.\n\nIn conclusion, I recommend pulling a Carfax or equivalent vehicle history report to check for any accidents, title issues, or odometer discrepancies, as these data sources do not cover such aspects. Additionally, given the recall history and the below-market price, it would be especially prudent to get a pre-purchase inspection (PPI) from an independent mechanic before finalizing the purchase. This small investment can provide significant peace of mind."
+        }
+      ],
+      "origin": "Real repro for taxonomy.md #1 (recall counts inflated/duplicated) - this exact vehicle originally showed 'four recall campaigns' with only two distinct campaigns, one counted three times."
+    },
+    {
+      "id": "happy_corolla_infotainment",
+      "tags": [
+        "happy_path",
+        "golden"
+      ],
+      "checks": [
+        {
+          "name": "tool_completeness",
+          "applicable": true,
+          "passed": true,
+          "detail": "all 4 tools called"
+        },
+        {
+          "name": "no_score_leakage",
+          "applicable": true,
+          "passed": true,
+          "detail": "no raw score/confidence language found"
+        },
+        {
+          "name": "recall_framing",
+          "applicable": true,
+          "passed": true,
+          "detail": "history framed correctly"
+        },
+        {
+          "name": "no_duplicate_recalls",
+          "applicable": true,
+          "passed": true,
+          "detail": "no duplicate campaigns"
+        },
+        {
+          "name": "no_code_formatting",
+          "applicable": true,
+          "passed": true,
+          "detail": "no backtick/code formatting"
+        },
+        {
+          "name": "price_dollar_formatting",
+          "applicable": true,
+          "passed": true,
+          "detail": "price shown with $ sign (or not mentioned)"
+        }
+      ],
+      "final_answer": "Searched NHTSA complaints for the 2016 Toyota Corolla using \"infotainment screen freezing\".\n\nWe found some reports for the 2016 Toyota Corolla, but none closely matched this specific issue. That could mean it's a related but distinct problem, an unrelated result, or a typo in how the symptom was described - this search alone can't tell which.\n\nVerdict: not a clearly known issue in this dataset - not a guarantee the vehicle is problem-free.\n\n---\n\nDue-Diligence Report for 2016 Toyota Corolla\n\nQuick verdict: No known reliability issue | Price: at market | 3 recalls on record | 5-star safety rating\n\n**Reliability**: There were no reliable complaints found specifically related to the infotainment screen freezing in the 2016 Toyota Corolla. The search returned no confident matches, indicating that this issue may not be widely reported or documented among owners. The closest related complaint (complaint #10913842) discussed visibility issues with the navigation screen when viewed through polarized sunglasses, which is not directly related to the freezing symptom.\n\n**Price Fairness**: The asking price of $12,000 is considered to be at market value for a 2016 Toyota Corolla with 75,000 miles. This conclusion is based on a comparison with six similar listings, where the median price was approximately $12,622, with a range from $11,312 to $12,998. Therefore, the price appears fair and in line with comparable vehicles.\n\n**Recall History**: There are three recall campaigns on record for the 2016 Toyota Corolla. The recalls include:\n1. Campaign 17V295000, concerning the temporary/emergency spare tire, which may not have been inflated to the proper pressure, increasing the risk of a crash.\n2. Campaign 19V503000, related to incorrect load carrying capacity labels, which could lead to unintentional overloading and increase crash risk.\n3. Campaign 20V024000, involving the airbag control unit that may malfunction during crashes, potentially disabling airbag deployment and increasing injury risk.\n\nIt's important to verify whether the repairs for these recalls have been completed on this specific vehicle by checking its VIN.\n\n**Safety Rating**: The 2016 Toyota Corolla received a 5-star overall crash-test rating from NHTSA, indicating excellent safety performance. It scored 5 stars in both front and side crash tests, and 4 stars in the rollover test.\n\nIn conclusion, I recommend pulling a Carfax or equivalent vehicle history report to check for any accidents, title issues, or odometer discrepancies, as these data sources do not cover such aspects. Additionally, given the recall history, it would be wise to get a pre-purchase inspection (PPI) from an independent mechanic before buying, as this small cost can provide significant protection and peace of mind.",
+      "steps": [
+        {
+          "phase": "act",
+          "tool": "search_complaints",
+          "args": {
+            "make": "Toyota",
+            "model": "Corolla",
+            "year": 2016,
+            "query": "infotainment screen freezing"
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_price_estimate",
+          "args": {
+            "make": "Toyota",
+            "model": "Corolla",
+            "year": 2016,
+            "odometer": 75000,
+            "asking_price": 12000,
+            "condition": "good"
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_recalls",
+          "args": {
+            "make": "Toyota",
+            "model": "Corolla",
+            "year": 2016
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_safety_rating",
+          "args": {
+            "make": "Toyota",
+            "model": "Corolla",
+            "year": 2016
+          }
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"ok\",\n  \"make\": \"Toyota\",\n  \"model\": \"Corolla\",\n  \"year\": 2016,\n  \"asking_price\": 12000.0,\n  \"odometer\": 75000,\n  \"condition\": \"good\",\n  \"sample_size\": 6,\n  \"median_comp_price\": 12622.5,\n  \"p25_comp_price\": 11312.5,\n  \"p75_comp_price\": 12998.0,\n  \"verdict\": \"at_market\",\n  \"message\": \"Found 6 comparable listing(s) (matched on condition) for a 2016 Toyota Corolla near 75,000 miles: median $12,622 (range $11,312-$12,998). Asking price $12,000 is at market.\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"no_confident_match\",\n  \"query\": \"infotainment screen freezing\",\n  \"make\": \"Toyota\",\n  \"model\": \"Corolla\",\n  \"year\": 2016,\n  \"min_score\": 0.7,\n  \"best_score_found\": 0.384480447,\n  \"results\": [],\n  \"closest_candidate\": {\n    \"complaint_id\": \"10913842\",\n    \"score\": 0.384480447,\n    \"make\": \"TOYOTA\",\n    \"model\": \"COROLLA\",\n    \"year\": 2016,\n    \"narrative\": \"THE NAVIGATION/ BACK UP SCREEN IS NOT VISIBLE WITH POLARIZED SUNGLASSES EXCEPT BY TILTING ONES HEAD AT A 45 DEGREE ANGLE. MANUFACTURERS RESPONSE IS \\\" HAVE SUBMITTED THE INFORMATION TO TOYOTA AND HAVE HEARD BACK THAT THIS CONDITION IS A KNOWN CONCERN WITH POLARIZED SUNGLASSES AS IT HAS BEEN SEEN BY OTHERS AS WELL. THE CONCLUSION IS THAT THE POLARIZATION IN THE GLASSES CAUSES THIS EFFECT AND IT IS NOT A DEFECT IN THE PRODUCTS NAVIGATION SCREEN\\\"\"\n  },\n  \"message\": \"No result met the 0.70 similarity threshold (best score found: 0.384). Likely a typo, an unrelated query, or no complaints on this topic for this vehicle.\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"ok\",\n  \"make\": \"Toyota\",\n  \"model\": \"Corolla\",\n  \"year\": 2016,\n  \"recalls\": [\n    {\n      \"campaign_number\": \"17V295000\",\n      \"component\": \"TIRES:TEMPORARY/EMERGENCY SPARE TIRE\",\n      \"summary\": \"Gulf States Toyota, Inc. (Gulf States) is recalling certain 2017 4Runner , 86, Avalon, Camry, Camry Hybrid, Corolla, Corolla iM, Highlander, Highlander Hybrid, Prius, Prius C, RAV4, RAV4 Hybrid, Sienna  and Yaris vehicles.  The spare tire air pressure was not adjusted to the proper pressure as stated on the Tire Pressure Label.\",\n      \"consequence\": \"A spare tire that is not inflated to the proper value may not perform as intended, increasing the risk of a crash.\",\n      \"remedy\": \"Gulf States will notify owners, and dealers will inspect the spare tires, adjusting their pressure as necessary, free of charge.  The recall began June 15, 2017.  Owners may contact Gulf States customer service at 1-800-444-1074.  Toyota's number for this recall is 17R2.\",\n      \"report_received_date\": \"02/05/2017\"\n    },\n    {\n      \"campaign_number\": \"19V503000\",\n      \"component\": \"EQUIPMENT:OTHER:LABELS\",\n      \"summary\": \"Southeast Toyota Distributors, LLC (SET) is recalling certain 2017-2019 Toyota Camry, Corolla, Rav4, Sienna, and Yaris iA vehicles equipped with factory-installed floor mats.  The load carrying capacity modification label may be incorrect.  As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard (FMVSS) number 110, \\\"Tire Selection and Rims.\\\"\",\n      \"consequence\": \"An incorrect label may lead to unintentionally overloading the vehicle, increasing the risk of a crash.\",\n      \"remedy\": \"SET will notify owners and provide a corrected label for placement over the inaccurate label, free of charge.  The recall began August 23, 2019.  Owners may contact Toyota customer service at 1-888-270-9371.  SET's number for this recall is SET19A.\",\n      \"report_received_date\": \"28/06/2019\"\n    },\n    {\n      \"campaign_number\": \"20V024000\",\n      \"component\": \"AIR BAGS: AIR BAG/RESTRAINT CONTROL MODULE\",\n      \"summary\": \"Toyota Motor Engineering & Manufacturing  (Toyota) is recalling certain 2011-2019 Corolla, 2011-2013 Matrix, 2012-2018 Avalon, and 2013-2018 Avalon Hybrid vehicles.  During certain crashes, the air bag electronic control unit (ECU) may malfunction, possibly disabling the deployment of the air bags and/or seat belt pretensioners.\",\n      \"consequence\": \"In the event of a crash, air bags and/or seat belt pretensioners that do not deploy as intended may increase the risk of injury.\",\n      \"remedy\": \"Toyota will notify owners, and dealers will inspect the ECU and install a noise filter between the air bag control module and its wire harness, as necessary, free of charge.  Owners were notified of the safety risk beginning March 2, 2020.  A second letter notifying owners of the remedy repair will be mailed between March 16, 2020 and June 27, 2020.  Owners may contact Toyota customer service at 1-888-270-9371.  Toyota's numbers for this recall are 20TB03, 20TA03 and 20TA05.\",\n      \"report_received_date\": \"17/01/2020\"\n    }\n  ],\n  \"message\": \"Found 3 recall campaign(s) on record for a 2016 Toyota Corolla. This means the manufacturer issued a recall for this model/year - it does NOT mean this specific vehicle's repair is still outstanding, since that depends on its VIN and service history.\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"ok\",\n  \"make\": \"Toyota\",\n  \"model\": \"Corolla\",\n  \"year\": 2016,\n  \"overall_rating\": \"5\",\n  \"front_crash_rating\": \"5\",\n  \"side_crash_rating\": \"5\",\n  \"rollover_rating\": \"4\",\n  \"vehicle_description\": \"2016 Toyota Corolla 4 DR FWD\",\n  \"message\": \"NHTSA overall crash-test rating for a 2016 Toyota Corolla: 5/5 stars.\"\n}"
+        },
+        {
+          "phase": "think",
+          "text": "Due-Diligence Report for 2016 Toyota Corolla\n\nQuick verdict: No known reliability issue | Price: at market | 3 recalls on record | 5-star safety rating\n\n**Reliability**: There were no reliable complaints found specifically related to the infotainment screen freezing in the 2016 Toyota Corolla. The search returned no confident matches, indicating that this issue may not be widely reported or documented among owners. The closest related complaint (complaint #10913842) discussed visibility issues with the navigation screen when viewed through polarized sunglasses, which is not directly related to the freezing symptom.\n\n**Price Fairness**: The asking price of $12,000 is considered to be at market value for a 2016 Toyota Corolla with 75,000 miles. This conclusion is based on a comparison with six similar listings, where the median price was approximately $12,622, with a range from $11,312 to $12,998. Therefore, the price appears fair and in line with comparable vehicles.\n\n**Recall History**: There are three recall campaigns on record for the 2016 Toyota Corolla. The recalls include:\n1. Campaign 17V295000, concerning the temporary/emergency spare tire, which may not have been inflated to the proper pressure, increasing the risk of a crash.\n2. Campaign 19V503000, related to incorrect load carrying capacity labels, which could lead to unintentional overloading and increase crash risk.\n3. Campaign 20V024000, involving the airbag control unit that may malfunction during crashes, potentially disabling airbag deployment and increasing injury risk.\n\nIt's important to verify whether the repairs for these recalls have been completed on this specific vehicle by checking its VIN.\n\n**Safety Rating**: The 2016 Toyota Corolla received a 5-star overall crash-test rating from NHTSA, indicating excellent safety performance. It scored 5 stars in both front and side crash tests, and 4 stars in the rollover test.\n\nIn conclusion, I recommend pulling a Carfax or equivalent vehicle history report to check for any accidents, title issues, or odometer discrepancies, as these data sources do not cover such aspects. Additionally, given the recall history, it would be wise to get a pre-purchase inspection (PPI) from an independent mechanic before buying, as this small cost can provide significant protection and peace of mind."
+        }
+      ],
+      "origin": "Real repro for taxonomy.md #2 (weak complaint search wiped the whole report) - this exact case's inconclusive complaint search used to discard the price/recall/safety findings the agent had already made."
+    },
+    {
+      "id": "golden_forte_injection_fp",
+      "tags": [
+        "golden",
+        "benign_repeat"
+      ],
+      "checks": [
+        {
+          "name": "tool_completeness",
+          "applicable": true,
+          "passed": true,
+          "detail": "all 4 tools called"
+        },
+        {
+          "name": "no_score_leakage",
+          "applicable": true,
+          "passed": true,
+          "detail": "no raw score/confidence language found"
+        },
+        {
+          "name": "recall_framing",
+          "applicable": true,
+          "passed": true,
+          "detail": "history framed correctly"
+        },
+        {
+          "name": "no_duplicate_recalls",
+          "applicable": true,
+          "passed": true,
+          "detail": "no duplicate campaigns"
+        },
+        {
+          "name": "no_code_formatting",
+          "applicable": true,
+          "passed": true,
+          "detail": "no backtick/code formatting"
+        },
+        {
+          "name": "price_dollar_formatting",
+          "applicable": true,
+          "passed": true,
+          "detail": "price shown with $ sign (or not mentioned)"
+        },
+        {
+          "name": "injection_gate",
+          "applicable": true,
+          "passed": true,
+          "detail": "expected_flagged=False actual_status=clean"
+        }
+      ],
+      "final_answer": "Searched NHTSA complaints for the 2020 Kia Forte using \"engine stalling\".\n\nWe found some reports for the 2020 Kia Forte, but none closely matched this specific issue. That could mean it's a related but distinct problem, an unrelated result, or a typo in how the symptom was described - this search alone can't tell which.\n\nVerdict: not a clearly known issue in this dataset - not a guarantee the vehicle is problem-free.\n\n---\n\nDue-Diligence Report for 2020 Kia Forte\n\nQuick verdict: No known reliability issue | Price: insufficient data | 2 recalls on record | 4-star safety rating\n\n**Reliability**: There were no confident matches found regarding engine stalling issues for the 2020 Kia Forte. While there was a related complaint for a 2021 model about engine failure and misfires (complaint #11548829), it does not directly indicate a widespread problem for the 2020 model. Therefore, it seems that engine stalling is not a well-documented issue for this vehicle.\n\n**Price Fairness**: The price of $13,000 for this 2020 Kia Forte with 51,000 miles cannot be evaluated for fairness due to insufficient data. There were no comparable listings found to determine if this asking price is reasonable or not.\n\n**Recall History**: There are two recall campaigns on record for the 2020 Kia Forte. The first (campaign 21V164000) involves the air bag/ restraint control module, where the system may fail to detect a child restraint in the front passenger seat, increasing the risk of injury in a crash. The second (campaign 22V304000) pertains to the steering column, where a bolt may not be secured properly, potentially leading to a loss of steering control. It's important to verify whether these recalls have been addressed on the specific vehicle you are considering.\n\n**Safety Rating**: The NHTSA has given the 2020 Kia Forte a 4-star overall crash-test rating. It scored 4 stars in the front crash test, 5 stars in the side crash test, and 4 stars in the rollover test, indicating a good level of safety performance.\n\nIn conclusion, I recommend pulling a Carfax or equivalent vehicle history report to check for any accidents, title issues, or odometer discrepancies, as these data sources do not cover such aspects. Additionally, given the recall history, it would be wise to get a pre-purchase inspection (PPI) from an independent mechanic before buying, as this small cost can provide significant protection.",
+      "steps": [
+        {
+          "phase": "act",
+          "tool": "search_complaints",
+          "args": {
+            "make": "Kia",
+            "model": "Forte",
+            "year": 2020,
+            "query": "engine stalling"
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_price_estimate",
+          "args": {
+            "make": "Kia",
+            "model": "Forte",
+            "year": 2020,
+            "odometer": 51000,
+            "asking_price": 13000,
+            "condition": "like new"
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_recalls",
+          "args": {
+            "make": "Kia",
+            "model": "Forte",
+            "year": 2020
+          }
+        },
+        {
+          "phase": "act",
+          "tool": "check_safety_rating",
+          "args": {
+            "make": "Kia",
+            "model": "Forte",
+            "year": 2020
+          }
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"no_confident_match\",\n  \"query\": \"engine stalling\",\n  \"make\": \"Kia\",\n  \"model\": \"Forte\",\n  \"year\": 2020,\n  \"min_score\": 0.7,\n  \"best_score_found\": 0.539855599,\n  \"results\": [],\n  \"closest_candidate\": {\n    \"complaint_id\": \"11548829\",\n    \"score\": 0.539855599,\n    \"make\": \"KIA\",\n    \"model\": \"FORTE\",\n    \"year\": 2021,\n    \"narrative\": \"Service engine light turns off then comes back on. Get message engine failure. Scanner at dealership scanned 15 codes relating to misfires on all cylinders. Positive battery terminal caked up real bad causing arcing and melting plastic. Last I heard from dealership was possibly a engine replacement.\"\n  },\n  \"message\": \"No result met the 0.70 similarity threshold (best score found: 0.540). Likely a typo, an unrelated query, or no complaints on this topic for this vehicle.\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"insufficient_data\",\n  \"make\": \"Kia\",\n  \"model\": \"Forte\",\n  \"year\": 2020,\n  \"asking_price\": 13000.0,\n  \"odometer\": 51000,\n  \"condition\": \"like new\",\n  \"sample_size\": 0,\n  \"median_comp_price\": null,\n  \"p25_comp_price\": null,\n  \"p75_comp_price\": null,\n  \"verdict\": \"unknown\",\n  \"message\": \"Only 0 comparable listing(s) found for a 2020 Kia Forte near 51,000 miles - not enough to judge whether $13,000 is fair.\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"ok\",\n  \"make\": \"Kia\",\n  \"model\": \"Forte\",\n  \"year\": 2020,\n  \"overall_rating\": \"4\",\n  \"front_crash_rating\": \"4\",\n  \"side_crash_rating\": \"5\",\n  \"rollover_rating\": \"4\",\n  \"vehicle_description\": \"2020 Kia Forte 4 DR FWD\",\n  \"message\": \"NHTSA overall crash-test rating for a 2020 Kia Forte: 4/5 stars.\"\n}"
+        },
+        {
+          "phase": "observe",
+          "text": "{\n  \"status\": \"ok\",\n  \"make\": \"Kia\",\n  \"model\": \"Forte\",\n  \"year\": 2020,\n  \"recalls\": [\n    {\n      \"campaign_number\": \"21V164000\",\n      \"component\": \"AIR BAGS: AIR BAG/RESTRAINT CONTROL MODULE\",\n      \"summary\": \"Kia Motors America (Kia) is recalling certain 2021 Telluride, K5, and Forte vehicles. The Occupant Classification and Detection System (OCS/ODS) unit may not detect the presence of a child restraint system in the front passenger seat.  As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard (FMVSS) number 208, \\\"Occupant Crash Protection.\\\"\",\n      \"consequence\": \"In the event of a crash, deployment of the front passenger air bag, with a child in that seat, can increase the risk of injury to the child.\",\n      \"remedy\": \"Kia will notify owners, and dealers will replace the OCS/ODS unit, free of charge.  The recall began March 18, 2021.  Owners may contact Kia customer service at 1-800-333-4542.  Kia's number for this recall is SC207.\",\n      \"report_received_date\": \"11/03/2021\"\n    },\n    {\n      \"campaign_number\": \"22V304000\",\n      \"component\": \"STEERING:COLUMN\",\n      \"summary\": \"Kia Motors America (Kia) is recalling certain 2021-2022 Rio and Forte vehicles.  A bolt in the steering column may not be secured properly, which can cause the steering column to detach from the steering rack and result in a loss of steering control.\",\n      \"consequence\": \"Loss of steering control can increase the risk of a crash.\",\n      \"remedy\": \"Dealers will tighten the lower steering column u-joint retention bolt, free of charge.  Owner notification letters were mailed May 27, 2022.  Owners may contact Kia customer service at 1-800-333-4542.  Kia's number for this recall SC235.\",\n      \"report_received_date\": \"05/05/2022\"\n    }\n  ],\n  \"message\": \"Found 2 recall campaign(s) on record for a 2020 Kia Forte. This means the manufacturer issued a recall for this model/year - it does NOT mean this specific vehicle's repair is still outstanding, since that depends on its VIN and service history.\"\n}"
+        },
+        {
+          "phase": "think",
+          "text": "Due-Diligence Report for 2020 Kia Forte\n\nQuick verdict: No known reliability issue | Price: insufficient data | 2 recalls on record | 4-star safety rating\n\n**Reliability**: There were no confident matches found regarding engine stalling issues for the 2020 Kia Forte. While there was a related complaint for a 2021 model about engine failure and misfires (complaint #11548829), it does not directly indicate a widespread problem for the 2020 model. Therefore, it seems that engine stalling is not a well-documented issue for this vehicle.\n\n**Price Fairness**: The price of $13,000 for this 2020 Kia Forte with 51,000 miles cannot be evaluated for fairness due to insufficient data. There were no comparable listings found to determine if this asking price is reasonable or not.\n\n**Recall History**: There are two recall campaigns on record for the 2020 Kia Forte. The first (campaign 21V164000) involves the air bag/ restraint control module, where the system may fail to detect a child restraint in the front passenger seat, increasing the risk of injury in a crash. The second (campaign 22V304000) pertains to the steering column, where a bolt may not be secured properly, potentially leading to a loss of steering control. It's important to verify whether these recalls have been addressed on the specific vehicle you are considering.\n\n**Safety Rating**: The NHTSA has given the 2020 Kia Forte a 4-star overall crash-test rating. It scored 4 stars in the front crash test, 5 stars in the side crash test, and 4 stars in the rollover test, indicating a good level of safety performance.\n\nIn conclusion, I recommend pulling a Carfax or equivalent vehicle history report to check for any accidents, title issues, or odometer discrepancies, as these data sources do not cover such aspects. Additionally, given the recall history, it would be wise to get a pre-purchase inspection (PPI) from an independent mechanic before buying, as this small cost can provide significant protection."
+        }
+      ],
+      "origin": "Real repro for taxonomy.md #3 (normal question mistaken for an attack) - found via live user testing 2026-08-27; false-flagged as a prompt-injection attempt ~40% of the time on this exact combination, even after an earlier fix had looked clean on a different vehicle/condition."
+    }
+  ]
+}

@@ -58,6 +58,15 @@ MAX_STEPS = 20
 INPUT_PRICE_PER_1M_TOKENS = 0.15
 OUTPUT_PRICE_PER_1M_TOKENS = 0.60
 
+# Below search_complaints's own DEFAULT_MIN_SCORE (0.70, not a confident
+# match) but above this, the closest candidate is worth showing to the user
+# rather than staying silent about it - e.g. a complaint literally
+# describing "car stalled and shut off while in drive" scored 0.573 for a
+# search on "engine stalling", well below the confidence bar but clearly not
+# noise either. Below this floor, the closest candidate is likely a
+# genuinely unrelated result, not worth quoting.
+NEAR_MISS_MIN_SCORE = 0.55
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -244,7 +253,15 @@ def _format_no_confident_match_answer(
     vehicle vs. complaints that just didn't clearly match) is easy for an LLM
     to blur or drop on a given run, and a demo needs this to be reproducible
     every time. Deliberately never surfaces min_score/best_score_found as raw
-    numbers - only whether a match exists at all.
+    numbers.
+
+    When the closest candidate scored reasonably close to the confidence
+    threshold (>= NEAR_MISS_MIN_SCORE), its narrative is quoted directly
+    instead of guessing at an explanation - a complaint describing "car
+    stalled and shut off while in drive" for a stalling query is not "an
+    edge case not well-represented in the data" (the old wording here, which
+    was static boilerplate that didn't look at what was actually found and
+    could be flatly wrong, as in that example).
 
     `include_closing_note` is False when this is being prepended to the
     LLM's own full due-diligence answer (which already ends with its own
@@ -274,15 +291,30 @@ def _format_no_confident_match_answer(
         )
         verdict = "Verdict: no data available for this vehicle in this dataset."
     else:
-        body = (
-            f"We found some loosely related reports for the {vehicle}, but nothing that clearly "
-            "matches this specific issue. That could mean it's a related but distinct problem, or "
-            "simply an edge case not well-represented in NHTSA's complaint data."
-        )
-        verdict = (
-            "Verdict: not a clearly known issue in this dataset - "
-            "not a guarantee the vehicle is problem-free."
-        )
+        closest = tool_result.get("closest_candidate")
+        if closest and best_score >= NEAR_MISS_MIN_SCORE:
+            narrative = closest.get("narrative", "")
+            narrative_preview = narrative if len(narrative) <= 200 else narrative[:200].rstrip() + "..."
+            body = (
+                f"We found a report that touches on a related symptom for the {vehicle}, but it wasn't a "
+                f"close enough match to call this a clearly documented issue. The closest one "
+                f"(complaint #{closest.get('complaint_id')}) described: \"{narrative_preview}\" - worth "
+                "being aware of, but not confirmed as the same pattern being asked about here."
+            )
+            verdict = (
+                "Verdict: a related report exists but wasn't a confident match - "
+                "not a guarantee the vehicle is problem-free, and not a guarantee this is unrelated either."
+            )
+        else:
+            body = (
+                f"We found some reports for the {vehicle}, but none closely matched this specific issue. "
+                "That could mean it's a related but distinct problem, an unrelated result, or a typo in "
+                "how the symptom was described - this search alone can't tell which."
+            )
+            verdict = (
+                "Verdict: not a clearly known issue in this dataset - "
+                "not a guarantee the vehicle is problem-free."
+            )
 
     if not include_closing_note:
         return f"{header}\n\n{body}\n\n{verdict}"

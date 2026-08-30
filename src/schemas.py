@@ -21,6 +21,11 @@ class RetrievalResponse(BaseModel):
     min_score: float
     best_score_found: float | None = None
     results: list[ComplaintResult] = []
+    # Populated whenever at least one candidate exists, even below
+    # min_score - lets a no_confident_match caller show what the closest
+    # near-miss actually said, instead of guessing whether it was a
+    # loosely-related report or a genuine data gap.
+    closest_candidate: ComplaintResult | None = None
     message: str
 
 
