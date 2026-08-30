@@ -60,3 +60,29 @@ def build_report_pdf(
     _write_line(pdf, clean_answer, size=10)
 
     return bytes(pdf.output())
+
+
+def build_chat_pdf(user_name: str, messages: list[dict]) -> bytes:
+    """The comparison chat's "Download chat" export - same PDF-only
+    convention as build_report_pdf above (a .md download felt like a
+    second, inconsistent format next to "Download PDF" everywhere else in
+    the app), speaker-labeled with sources listed under any message that
+    has them."""
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    _write_line(pdf, f"CarScout chat - {user_name}", size=16, bold=True, line_height=10)
+    pdf.ln(4)
+
+    for msg in messages:
+        speaker = "You" if msg["role"] == "user" else "CarScout"
+        _write_line(pdf, speaker, size=11, bold=True, line_height=7)
+        clean_content = msg["content"].replace("**", "").replace("#", "").replace("`", "")
+        _write_line(pdf, clean_content, size=10)
+        if msg.get("sources"):
+            sources_line = "Sources: " + ", ".join(f"{s['title']} ({s['url']})" for s in msg["sources"])
+            _write_line(pdf, sources_line, size=9)
+        pdf.ln(3)
+
+    return bytes(pdf.output())

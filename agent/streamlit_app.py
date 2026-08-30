@@ -651,21 +651,6 @@ CHAT_WIDGET_CSS = """<style>
 </style>"""
 
 
-def _build_chat_transcript(user_name: str, messages: list[dict]) -> str:
-    """Plain-text export of a chat session for the download button below -
-    the chat itself only ever lives in st.session_state (see
-    _render_comparison_chat_panel's docstring), so this is the one way a
-    user can keep a copy of it past the current browser session."""
-    lines = [f"CarScout chat - {user_name}", f"Exported {_format_pacific(datetime.now(timezone.utc))}", ""]
-    for msg in messages:
-        speaker = "You" if msg["role"] == "user" else "CarScout"
-        lines.append(f"{speaker}: {msg['content']}")
-        if msg.get("sources"):
-            lines.append("Sources: " + ", ".join(f"{s['title']} ({s['url']})" for s in msg["sources"]))
-        lines.append("")
-    return "\n".join(lines)
-
-
 def _render_comparison_chat_panel(ranked_entries, user_name, rank_labels):
     """Chat over the user's own evaluated listings - grounded in the same
     saved tiles/summaries the comparison grid renders, not a second live-
@@ -702,16 +687,18 @@ def _render_comparison_chat_panel(ranked_entries, user_name, rank_labels):
         # session_state (see this function's docstring), so this is the
         # one way to keep a copy of it past the current browser session.
         if len(st.session_state[chat_key]) > 1:
-            # type="primary" isn't decorative here - Streamlit's default
+            # PDF, not the earlier .md export - a text download was a
+            # second, inconsistent file format sitting next to "Download
+            # PDF" everywhere else in the app; report_pdf.build_chat_pdf
+            # reuses the exact same fpdf2 writer that report already uses.
+            # type="primary" isn't decorative either - Streamlit's default
             # (type="secondary") button is a plain white pill with dark
             # text, which the rest of this panel never uses; against the
             # dark gradient background it rendered as a blank white box at
-            # rest (only the hover ring gave it any color at all). Same
-            # fix as "Download PDF" elsewhere in this file, which hits the
-            # identical white-on-dark mismatch.
+            # rest (only the hover ring gave it any color at all).
             st.download_button(
-                "Download chat", data=_build_chat_transcript(user_name, st.session_state[chat_key]),
-                file_name=f"carscout_chat_{user_name}.md".replace(" ", "_"), mime="text/markdown",
+                "Download chat", data=report_pdf.build_chat_pdf(user_name, st.session_state[chat_key]),
+                file_name=f"carscout_chat_{user_name}.pdf".replace(" ", "_"), mime="application/pdf",
                 key="download_chat", type="primary", icon=":material/download:", use_container_width=True,
             )
 
