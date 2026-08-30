@@ -169,7 +169,6 @@ DARK_CARD_CSS = """<style>
     padding: 8px 16px; border-radius: 20px; display: inline-flex; align-items: center; gap: 7px;
 }
 .dark-title { color: #ffffff; font-size: 21px; font-weight: 700; margin: 4px 18px 6px; }
-.dark-signals { color: rgba(255,255,255,0.62); font-size: 13px; padding: 4px 0; margin: 0 18px 8px; }
 .dark-price-row {
     display: flex; gap: 12px; align-items: center; color: #ffffff; font-weight: 700;
     font-size: 15px; margin: 18px 18px 18px;
@@ -191,6 +190,14 @@ DARK_CARD_CSS = """<style>
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .dark-tile-grid { margin: 0 18px 20px; }
+[class*="st-key-card_"] [data-testid="stProgress"] {
+    width: calc(100% - 36px) !important;
+    margin: 0 18px 18px !important;
+}
+[class*="st-key-card_"] [data-testid="stProgress"] p {
+    color: rgba(255,255,255,0.85) !important;
+    font-size: 13px !important;
+}
 [class*="st-key-card_"] [role="progressbar"] {
     background: rgba(255,255,255,0.15) !important;
 }
@@ -211,11 +218,18 @@ DARK_CARD_CSS = """<style>
        plain margin shifts the box right without shrinking it - it just
        overflows past the card's edge on the right instead of centering
        inside it. width:calc(100% - 36px) forces the actual shrink the
-       margin was supposed to cause. */
+       margin was supposed to cause. Bottom margin here (not on the card
+       itself, which is kept near-zero so the image stays flush against
+       the rounded corners) is what actually gives the buttons breathing
+       room from the card's bottom edge - they used to sit 5px from it. */
     width: calc(100% - 36px) !important;
-    margin: 0 18px !important;
+    margin: 0 18px 18px !important;
 }
 [class*="st-key-card_"] [data-testid="stExpander"] {
+    /* Same explicit-width-not-auto issue as the button row above - this
+       was overflowing 13px past the card's right edge for the same
+       reason, just not measured until now. */
+    width: calc(100% - 36px) !important;
     margin: 0 18px 14px;
     background: transparent !important;
     border: 1px solid rgba(255,255,255,0.18) !important;
@@ -512,16 +526,20 @@ with tab_compare:
                         unsafe_allow_html=True,
                     )
                     if score is not None:
-                        st.markdown(
-                            f'<p class="dark-signals">{score}/{MAX_RANK_SCORE} signals positive</p>',
-                            unsafe_allow_html=True,
-                        )
                         # A same-width bar per card is what actually makes
                         # "which one's better" jump out at a glance across
                         # the grid - reading four individual tile colors per
                         # card and comparing them mentally, card to card,
-                        # doesn't.
-                        st.progress(score / MAX_RANK_SCORE)
+                        # doesn't. The score used to sit in its own
+                        # <p> above an unlabeled bar - two disconnected
+                        # elements. st.progress()'s own text= param glues
+                        # the number to the bar it actually describes,
+                        # instead of the bar being decoration with no
+                        # information of its own.
+                        st.progress(
+                            score / MAX_RANK_SCORE,
+                            text=f"{score}/{MAX_RANK_SCORE} signals positive",
+                        )
 
                     st.markdown(
                         '<div class="dark-price-row">'
