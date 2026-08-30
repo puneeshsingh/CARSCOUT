@@ -50,8 +50,9 @@ TILE_ICONS = {
     "safety": ":material/shield:",
 }
 # Points per tile color, used to rank evaluated listings best-first in the
-# comparison grid - not shown to the user as raw numbers, just the sort key.
+# comparison grid.
 _RANK_POINTS = {"green": 2, "amber": 1, "red": 0}
+MAX_RANK_SCORE = len(TILE_TITLES) * max(_RANK_POINTS.values())
 
 _STAR_HEADLINE_RE = re.compile(r"^(\d)-star overall rating$")
 
@@ -280,17 +281,36 @@ with tab_compare:
         st.caption(
             f"{len(recent)} evaluated listing(s) for {user_name}, best overall result first."
         )
+        # Score per entry, in the same best-first order as `ranked` - reused
+        # below both for the badge logic and the progress-bar visual, so the
+        # two never disagree.
+        scores = [_rank_score(e.tiles()) if e.tiles() else None for e in ranked]
+        best_score = scores[0] if scores and scores[0] is not None else None
         compare_cols = st.columns(3)
         for i, entry in enumerate(ranked):
             tiles = entry.tiles()
+            score = scores[i]
             with compare_cols[i % 3]:
                 with st.container(border=True):
                     image_path = _vehicle_image_path(entry.make, entry.model)
                     if image_path:
                         st.image(_load_vehicle_image(str(image_path), *GRID_IMAGE_SIZE), use_container_width=True)
                     if tiles and rank_eligible > 1:
+                        # The worst-signal-wins verdict badge below is
+                        # deliberately conservative (reliability is never
+                        # "green"), so on its own almost every listing reads
+                        # as the same amber "worth a closer look" - not
+                        # useful for telling listings apart. The rank badge
+                        # is what should actually say "consider this one" vs
+                        # "maybe not this one": top score stays the green
+                        # medal, the strictly-lowest score (only when it's
+                        # really behind the best, not just tied) gets its own
+                        # red flag instead of blending in as just another
+                        # "#N" blue badge.
                         if i == 0:
                             st.badge("Best of your evaluated listings", icon=":material/military_tech:", color="green")
+                        elif i == len(ranked) - 1 and score is not None and best_score is not None and score < best_score:
+                            st.badge("Lowest-ranked - consider carefully", icon=":material/thumb_down:", color="red")
                         else:
                             st.badge(f"#{i + 1} of your evaluated listings", icon=":material/star:", color="blue")
                     if tiles:
@@ -300,6 +320,16 @@ with tab_compare:
                             "green": ("Looks solid", ":material/thumb_up:", "green"),
                         }[_overall_color(tiles)]
                         st.badge(verdict_badge[0], icon=verdict_badge[1], color=verdict_badge[2])
+                    if score is not None:
+                        # A same-width bar per card is what actually makes
+                        # "which one's better" jump out at a glance across
+                        # the grid - reading four individual tile colors per
+                        # card and comparing them mentally, card to card,
+                        # doesn't.
+                        st.progress(
+                            score / MAX_RANK_SCORE,
+                            text=f"{score}/{MAX_RANK_SCORE} signals positive",
+                        )
                     st.markdown(f"**{entry.year} {entry.make} {entry.model}**")
                     st.caption(
                         f"{entry.symptom} · ${entry.asking_price:,.0f} / {entry.odometer:,} mi · "
@@ -506,12 +536,19 @@ with tab_run:
             st.warning(f"Agent hit the {cla.MAX_STEPS}-step cap without a confident final answer (failed closed).")
         else:
             st.subheader("At a glance")
+            verdict_badge = {
+                "red": ("Needs caution", ":material/warning:", "red"),
+                "amber": ("Worth a closer look", ":material/visibility:", "orange"),
+                "green": ("Looks solid", ":material/thumb_up:", "green"),
+            }[_overall_color(result["tiles"])]
+            st.badge(verdict_badge[0], icon=verdict_badge[1], color=verdict_badge[2])
             tile_cols = st.columns(4)
             for col, (signal, title) in zip(tile_cols, TILE_TITLES.items()):
                 tile = result["tiles"].get(signal, {"color": "amber", "headline": "No data"})
                 headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
                 with col:
-                    TILE_RENDERERS[tile["color"]](f"**{title}**\n\n{headline}", icon=TILE_ICONS[signal])
+                    with st.container(border=True, height=140):
+                        TILE_RENDERERS[tile["color"]](f"**{title}**\n\n{headline}", icon=TILE_ICONS[signal])
 
             st.subheader("Final answer")
             TILE_RENDERERS[_overall_color(result["tiles"])](_escape_for_markdown(result["final_answer"]))
