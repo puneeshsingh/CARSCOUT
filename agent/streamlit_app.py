@@ -7,6 +7,7 @@ renders the Think -> Act -> Observe trace plus token cost.
 For the bootcamp cohort demo. Not polished, not for production use.
 """
 
+import base64
 import re
 import sys
 from datetime import timezone
@@ -227,15 +228,29 @@ with st.sidebar:
 
 st.logo(str(LOGO_PATH), size="large", icon_image=str(LOGO_PATH))
 
-col_logo, col_title = st.columns([1, 8], vertical_alignment="center")
-with col_logo:
-    st.image(str(LOGO_PATH), width=90)
-with col_title:
-    st.title("CarScout — A Deep Agent for Used-Car Due Diligence")
-    st.caption(
-        "Checks reliability, price fairness, recalls, and safety for a used-car listing - grounded "
-        "in real NHTSA and Craigslist data, never guessed from training knowledge."
-    )
+
+@st.cache_data
+def _logo_b64() -> str:
+    return base64.b64encode(LOGO_PATH.read_bytes()).decode()
+
+
+# st.columns() sizes columns proportionally to the full page width, so any
+# ratio still leaves a huge gap around a small fixed-width image on a wide
+# screen - a plain flex row with a fixed gap keeps the logo snug against the
+# title regardless of page width.
+st.markdown(
+    f"""<div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem;">
+<img src="data:image/jpeg;base64,{_logo_b64()}" width="72" style="border-radius:6px; flex-shrink:0;">
+<div>
+<h1 style="margin:0; padding:0; line-height:1.2;">CarScout — A Deep Agent for Used-Car Due Diligence</h1>
+</div>
+</div>""",
+    unsafe_allow_html=True,
+)
+st.caption(
+    "Checks reliability, price fairness, recalls, and safety for a used-car listing - grounded "
+    "in real NHTSA and Craigslist data, never guessed from training knowledge."
+)
 
 tab_run, tab_compare = st.tabs(["Run a new check", "Your evaluated listings"])
 
