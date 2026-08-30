@@ -69,40 +69,60 @@ def _starred_headline(headline: str) -> str:
     return f"{'★' * stars}{'☆' * (5 - stars)}  ({headline})"
 
 
-# Native st.error/warning/success (still used for the full-width recommend/
-# avoid banners, where the padding earns its keep) are too padded for a
-# per-signal chip - four of them stacked ate most of a card's vertical
-# space. These render the same severity color as flat, compact, bordered
-# chips instead - plain Unicode icons rather than Streamlit's `:material/`
-# ligature syntax, since that only resolves inside native st.* calls, not
-# raw HTML.
+# Native st.error/warning/success (still used for the recommend/avoid rank
+# badge) are too padded for a per-signal tile - four of them stacked (or
+# even four flat full-width chips) read as stretched-out bars, not a quick
+# scannable summary. These render the same severity color as a 2x2 grid of
+# small, equal-size, square-ish tiles instead - plain Unicode icons rather
+# than Streamlit's `:material/` ligature syntax, since that only resolves
+# inside native st.* calls, not raw HTML. Every value interpolated in here
+# comes from classify_tiles()'s fixed headline templates (TILE_TITLES keys,
+# signal counts, star ratings) - never free-text user input - so this is
+# safe to render as raw HTML.
 _CHIP_COLORS = {
     "red": {"bg": "rgba(224, 49, 49, 0.12)", "accent": "#e03131"},
     "amber": {"bg": "rgba(232, 131, 12, 0.14)", "accent": "#e8830c"},
     "green": {"bg": "rgba(43, 138, 62, 0.12)", "accent": "#2b8a3e"},
 }
+# A whole comparison-grid card gets tinted with this (see the recommend/
+# avoid logic below) - a noticeably stronger tint than a small chip needs,
+# since it's meant to read as "this card is green/red" at a glance, not
+# just a faint hint.
+_CARD_TINTS = {
+    "red": {"bg": "rgba(224, 49, 49, 0.28)", "accent": "#e03131"},
+    "green": {"bg": "rgba(43, 138, 62, 0.28)", "accent": "#2b8a3e"},
+}
 SIGNAL_EMOJI = {"reliability": "🔧", "price": "🏷️", "recalls": "📢", "safety": "🛡️"}
 
 
-def _signal_chips_html(tiles: dict) -> str:
-    """All four signal chips for one card/column, as a single HTML block -
-    laying them out via one st.markdown() call (rather than four separate
-    widgets) avoids Streamlit's own per-widget vertical spacing stacking on
-    top of the chips' own margin."""
-    chips = []
+def _signal_squares_html(tiles: dict) -> str:
+    """4 signal tiles for one card, as a 2x2 grid of fixed-size squares in a
+    single HTML block - a CSS grid is what actually guarantees identical
+    cell sizes regardless of headline length, which four separate Streamlit
+    widgets never would. Headline text that's too long to fit is clamped to
+    2 lines with an ellipsis; the full text is still available as a native
+    hover tooltip and, always, in "View full report" below."""
+    cells = []
     for signal, title in TILE_TITLES.items():
         tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
         headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
         style = _CHIP_COLORS[tile["color"]]
-        chips.append(
-            f'<div style="display:flex;gap:6px;align-items:flex-start;'
-            f'padding:5px 8px;margin-bottom:5px;border-radius:5px;'
-            f'background:{style["bg"]};border-left:3px solid {style["accent"]};">'
-            f'<span style="font-size:12px;line-height:1.4;">{SIGNAL_EMOJI[signal]}</span>'
-            f'<span style="font-size:12px;line-height:1.4;"><b>{title}:</b> {headline}</span>'
+        cells.append(
+            f'<div title="{title}: {headline}" style="display:flex;flex-direction:column;'
+            f'align-items:center;justify-content:center;text-align:center;gap:2px;height:84px;'
+            f'padding:6px;border-radius:8px;background:{style["bg"]};'
+            f'border:1px solid {style["accent"]};overflow:hidden;">'
+            f'<span style="font-size:16px;line-height:1;">{SIGNAL_EMOJI[signal]}</span>'
+            f'<span style="font-size:11px;font-weight:600;line-height:1.2;">{title}</span>'
+            f'<span style="font-size:10.5px;line-height:1.25;display:-webkit-box;'
+            f'-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{headline}</span>'
             f"</div>"
         )
-    return "".join(chips)
+    return (
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
+        + "".join(cells)
+        + "</div>"
+    )
 
 
 def _rank_score(tiles: dict) -> int:
@@ -331,32 +351,33 @@ with tab_compare:
             # almost every listing reads as the same amber "worth a closer
             # look", which doesn't tell listings apart. This is what should
             # actually say "choose this one" vs "maybe not this one": the
-            # top score gets a green card border + banner, the strictly-
-            # lowest score (only when it's really behind the best, not just
-            # tied) gets a red one - loud, not a small badge chip, since
-            # this is the single most decision-relevant line on the card.
-            # Anyone in between stays a plain, understated badge/border -
-            # correctly reading as "no strong opinion".
+            # whole card is tinted, not just its border - green for the top
+            # score, red for the strictly-lowest score (only when it's
+            # really behind the best, not just tied). Anyone in between
+            # stays the plain default card - correctly reading as "no
+            # strong opinion".
             is_lowest = (
                 i == len(ranked) - 1 and score is not None
                 and best_score is not None and score < best_score
             )
-            card_border_color = None
+            card_style = None
             if tiles and rank_eligible > 1:
                 if i == 0:
-                    card_border_color = "#2b8a3e"
+                    card_style = _CARD_TINTS["green"]
                 elif is_lowest:
-                    card_border_color = "#e03131"
+                    card_style = _CARD_TINTS["red"]
             with compare_cols[i % 3]:
-                if card_border_color:
+                if card_style:
                     # st.container(border=True) only draws a neutral default
-                    # border - key="..." tags the wrapper with a matching
-                    # "st-key-..." CSS class (Streamlit's own supported hook
-                    # for styling one specific container), which this scoped
-                    # <style> block then recolors.
+                    # border with no color/background parameter - key="..."
+                    # tags the wrapper with a matching "st-key-..." CSS class
+                    # (Streamlit's own supported hook for styling one
+                    # specific container), which this scoped <style> block
+                    # then recolors and tints.
                     st.markdown(
                         f"<style>.st-key-card_{entry.id} {{ "
-                        f"border-color: {card_border_color} !important; "
+                        f"background-color: {card_style['bg']} !important; "
+                        f"border-color: {card_style['accent']} !important; "
                         f"border-width: 2px !important; }}</style>",
                         unsafe_allow_html=True,
                     )
@@ -365,10 +386,17 @@ with tab_compare:
                     if image_path:
                         st.image(_load_vehicle_image(str(image_path), *GRID_IMAGE_SIZE), use_container_width=True)
                     if tiles and rank_eligible > 1:
+                        # Always the same widget (st.badge) regardless of
+                        # rank, just different text/color/icon - using a
+                        # taller st.success/st.error banner only for the
+                        # extremes made those two cards visibly taller than
+                        # the rest of the grid; the card tint above is what
+                        # signals "choose this" / "avoid this" now, so the
+                        # badge itself can stay uniform.
                         if i == 0:
-                            st.success("Recommended - best of your evaluated listings", icon=":material/military_tech:")
+                            st.badge("Recommended - best pick", icon=":material/military_tech:", color="green")
                         elif is_lowest:
-                            st.error("Lowest-ranked - consider carefully", icon=":material/thumb_down:")
+                            st.badge("Lowest-ranked - use caution", icon=":material/thumb_down:", color="red")
                         else:
                             st.badge(f"#{i + 1} of your evaluated listings", icon=":material/star:", color="blue")
                     if tiles:
@@ -394,7 +422,7 @@ with tab_compare:
                         f"{_format_pacific(entry.created_at)}"
                     )
                     if tiles:
-                        st.markdown(_signal_chips_html(tiles), unsafe_allow_html=True)
+                        st.markdown(_signal_squares_html(tiles), unsafe_allow_html=True)
                     else:
                         # Saved before tile classification existed - no
                         # per-signal colors to show, just the plain text.
