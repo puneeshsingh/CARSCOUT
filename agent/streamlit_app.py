@@ -295,22 +295,28 @@ with tab_compare:
                     image_path = _vehicle_image_path(entry.make, entry.model)
                     if image_path:
                         st.image(_load_vehicle_image(str(image_path), *GRID_IMAGE_SIZE), use_container_width=True)
+                    # The worst-signal-wins verdict badge (below) is
+                    # deliberately conservative - reliability is never
+                    # "green" - so on its own almost every listing reads as
+                    # the same amber "worth a closer look", which doesn't
+                    # tell listings apart. The rank callout is what should
+                    # actually say "choose this one" vs "maybe not this
+                    # one": the top score gets a loud green banner, the
+                    # strictly-lowest score (only when it's really behind
+                    # the best, not just tied) gets an equally loud red one
+                    # - full-width alerts, not a small badge chip, since
+                    # this is the single most decision-relevant line on the
+                    # card. Anyone in between stays a plain, understated
+                    # badge - correctly reading as "no strong opinion".
+                    is_lowest = (
+                        i == len(ranked) - 1 and score is not None
+                        and best_score is not None and score < best_score
+                    )
                     if tiles and rank_eligible > 1:
-                        # The worst-signal-wins verdict badge below is
-                        # deliberately conservative (reliability is never
-                        # "green"), so on its own almost every listing reads
-                        # as the same amber "worth a closer look" - not
-                        # useful for telling listings apart. The rank badge
-                        # is what should actually say "consider this one" vs
-                        # "maybe not this one": top score stays the green
-                        # medal, the strictly-lowest score (only when it's
-                        # really behind the best, not just tied) gets its own
-                        # red flag instead of blending in as just another
-                        # "#N" blue badge.
                         if i == 0:
-                            st.badge("Best of your evaluated listings", icon=":material/military_tech:", color="green")
-                        elif i == len(ranked) - 1 and score is not None and best_score is not None and score < best_score:
-                            st.badge("Lowest-ranked - consider carefully", icon=":material/thumb_down:", color="red")
+                            st.success("Recommended - best of your evaluated listings", icon=":material/military_tech:")
+                        elif is_lowest:
+                            st.error("Lowest-ranked - consider carefully", icon=":material/thumb_down:")
                         else:
                             st.badge(f"#{i + 1} of your evaluated listings", icon=":material/star:", color="blue")
                     if tiles:
@@ -336,10 +342,18 @@ with tab_compare:
                         f"{_format_pacific(entry.created_at)}"
                     )
                     if tiles:
+                        # A 2x2 sub-grid was tried first but a 3-per-row
+                        # comparison card is only ~250px wide, and splitting
+                        # that in half left no room for "Reliability"/"Recall
+                        # history" to render without clipping - a single
+                        # compact, bordered, fixed-height strip per signal
+                        # instead: same visual boundary and equal-size ask,
+                        # without starving the text of width.
                         for signal, title in TILE_TITLES.items():
                             tile = tiles.get(signal, {"color": "amber", "headline": "No data"})
                             headline = _starred_headline(tile["headline"]) if signal == "safety" else tile["headline"]
-                            TILE_RENDERERS[tile["color"]](f"{title}: {headline}", icon=TILE_ICONS[signal])
+                            with st.container(border=True, height=92):
+                                TILE_RENDERERS[tile["color"]](f"**{title}:** {headline}", icon=TILE_ICONS[signal])
                     else:
                         # Saved before tile classification existed - no
                         # per-signal colors to show, just the plain text.
