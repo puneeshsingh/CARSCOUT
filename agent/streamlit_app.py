@@ -440,7 +440,7 @@ def _render_login_page() -> None:
             f'style="border-radius:16px;box-shadow:0 0 20px rgba(20,180,160,0.4);">'
             f'<h1 style="margin:16px 0 4px;font-size:26px;">CarScout</h1>'
             f'<p style="margin:0 0 26px;opacity:0.75;font-size:14px;">'
-            f"Sign in to check and compare used-car listings</p></div>",
+            f"Explore due-diligence checks on 6 example used-car listings</p></div>",
             unsafe_allow_html=True,
         )
         with st.form("login_form", border=False):
@@ -576,8 +576,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(
-    "Checks reliability, price fairness, recalls, and safety for a used-car listing - grounded "
-    "in real NHTSA and Craigslist data, never guessed from training knowledge."
+    "A due-diligence agent demonstrated on 6 real historical listings - checks reliability, price "
+    "fairness, recalls, and safety, grounded in real NHTSA and Craigslist data, never guessed from "
+    "training knowledge."
 )
 
 # Chat over the user's own evaluated listings, as a right-docked panel the
@@ -1059,6 +1060,10 @@ with tab_compare:
             _render_comparison_chat_panel(ranked, user_name, rank_labels)
 
 with tab_run:
+    st.caption(
+        "A curated set of 6 real vehicles with real (2021-era) price and mileage data - not a live "
+        "listing search."
+    )
     selected_label = st.selectbox(
         "Choose a listing (VIN)", VIN_LABELS, index=None,
         placeholder="Select a vehicle listing to preview...", key="form_vin_label",
