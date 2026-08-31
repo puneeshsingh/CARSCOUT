@@ -1,5 +1,13 @@
 """
-Week 4 eval suite page - run the eval suite and compare two saved runs.
+Week 4 eval suite dashboard - run the eval suite and compare two saved runs.
+
+Moved out of agent/pages/ (was "Evaluations" in the main app's nav) - this
+is a dev/grading tool for inspecting eval runs, not something a used-car
+buyer using the app needs to see. Run directly with:
+    uv run streamlit run evals/eval_dashboard.py
+The canonical way to run the suite itself is still the CLI
+(`uv run python evals/run_evals.py`, see README) - this page is a
+convenience viewer on top of the same saved results/*.json files.
 """
 
 import json
@@ -14,9 +22,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-AGENT_DIR = Path(__file__).resolve().parent.parent
-PROJECT_ROOT = AGENT_DIR.parent
-EVALS_DIR = PROJECT_ROOT / "evals"
+EVALS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = EVALS_DIR.parent
+AGENT_DIR = PROJECT_ROOT / "agent"
 RESULTS_DIR = EVALS_DIR / "results"
 TAXONOMY_PATH = EVALS_DIR / "taxonomy.md"
 
