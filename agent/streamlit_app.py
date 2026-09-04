@@ -1206,7 +1206,7 @@ with tab_run:
             final_answer = guards.INJECTION_NOTE + final_answer
 
         if trace["hit_step_cap"]:
-            st.session_state["last_result"] = {"hit_step_cap": True}
+            st.session_state["last_result"] = {"hit_step_cap": True, "vin": listing["vin"]}
         else:
             # Write gate: only save runs that produced a real answer, not a
             # step-cap failure - matches the "stable, high-confidence facts
@@ -1217,7 +1217,7 @@ with tab_run:
                 final_answer, user_name=user_name, tiles=trace["tiles"],
             )
             st.session_state["last_result"] = {
-                "hit_step_cap": False,
+                "hit_step_cap": False, "vin": listing["vin"],
                 "make": make, "vehicle_model": vehicle_model, "year": year,
                 "asking_price": asking_price, "odometer": odometer, "symptom": symptom_clean,
                 "final_answer": final_answer, "tiles": trace["tiles"], "steps": trace["steps"],
@@ -1233,7 +1233,14 @@ with tab_run:
         # actual click triggers).
         st.rerun()
 
+    # Scoped to the currently selected VIN, not just "the last run" - without
+    # this, switching listings (or clicking "Use this search" for a
+    # different car) kept showing the previous car's report/tiles below the
+    # new one's form, since last_result itself never gets cleared on a plain
+    # selectbox change.
     result = st.session_state.get("last_result")
+    if result and result.get("vin") != listing["vin"]:
+        result = None
     if result:
         if result["hit_step_cap"]:
             st.warning(f"Agent hit the {cla.MAX_STEPS}-step cap without a confident final answer (failed closed).")
