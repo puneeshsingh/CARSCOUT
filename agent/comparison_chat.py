@@ -17,8 +17,11 @@ dedicated, single-purpose call isn't.
 import json
 import logging
 import os
+import re
+from typing import Literal
 
 from openai import OpenAI
+from pydantic import BaseModel
 from tavily import TavilyClient
 
 import guards
@@ -51,15 +54,90 @@ _TILE_TITLES = {
 # arithmetic removes the judgment call entirely - it only has numbers to
 # relay, nothing to infer.
 _RANK_POINTS = {"green": 2, "amber": 1, "red": 0}
+# Mirrors streamlit_app.py's _STAR_HEADLINE_RE/_safety_stars exactly (same
+# local-copy reasoning) - a 4-star and 5-star safety rating are both "green"
+# by design (classify_tiles buckets them the same), so two listings tied on
+# every tile color but differing only in star count used to be a genuine
+# tie in _rank_score() alone. The comparison grid now breaks that tie by
+# star count before falling back to recency - this mirrors the same
+# tiebreak here so the chat's explanation always matches the actual
+# displayed order.
+_STAR_HEADLINE_RE = re.compile(r"^(\d)-star overall rating$")
+# Recall tile headline is always "{count} recall(s) on record - verify by
+# VIN" (see classify_tiles in complaint_lookup_agent.py) - parsed here so
+# recall count can be a structured, comparable fact rather than something
+# the model has to extract from a sentence itself.
+_RECALL_COUNT_RE = re.compile(r"^(\d+) recall")
+
+
+def _safety_stars(tiles: dict) -> int:
+    match = _STAR_HEADLINE_RE.match(tiles.get("safety", {}).get("headline", ""))
+    return int(match.group(1)) if match else 0
+
+
+def _recall_count(tiles: dict) -> int:
+    match = _RECALL_COUNT_RE.match(tiles.get("recalls", {}).get("headline", ""))
+    return int(match.group(1)) if match else 0
+
+
+class SignalFact(BaseModel):
+    color: Literal["red", "amber", "green"]
+    points: int
+    headline: str
+
+
+class ListingFacts(BaseModel):
+    """Structured, comparable facts for one evaluated listing - serialized \
+    to JSON and handed to the model in place of prose, so any numeric \
+    comparison (price, mileage, recall count, rank score, tile points) is \
+    read from an unambiguous field instead of parsed or inferred from a \
+    sentence. Real motivation, not a style preference: with the same facts \
+    stated only in prose ("4-star overall rating"), gpt-4o repeatedly \
+    overrode a listing's actual stored tile color with its own assumption \
+    about what the color "should" be. A typed field leaves nothing to \
+    infer."""
+
+    vehicle: str
+    asking_price_usd: float
+    odometer_mi: int
+    condition: str
+    symptom_asked: str
+    evaluated_at: str | None = None
+    rank_label: str | None = None
+    rank_score: int | None = None
+    rank_score_max: int | None = None
+    safety_stars: int | None = None
+    recall_count: int | None = None
+    signals: dict[str, SignalFact] | str | None = None
+
 
 SYSTEM_PROMPT_TEMPLATE = """You are a helpful assistant answering questions about used-car listings the \
 user has already evaluated with CarScout, a due-diligence tool. Answer questions about a specific vehicle \
-ONLY using the listing summaries below - never state or imply anything about a vehicle's reliability, price \
+ONLY using the listing data below - never state or imply anything about a vehicle's reliability, price \
 fairness, recalls, or safety rating beyond what's given here, and never draw on outside/training knowledge \
 about specific vehicles or models. If the user asks something about a vehicle that the data below doesn't \
-cover, say so plainly instead of guessing. Each listing includes its full due-diligence report below the \
-signal tiles - prefer citing specifics from that report (a complaint number, a price comp range, a named \
-recall, a safety-test breakdown) over restating a tile's one-line headline when the question calls for depth.
+cover, say so plainly instead of guessing.
+
+Each listing below has two parts: a JSON block of pre-computed structured facts, followed by its full \
+due-diligence report as plain text. The JSON is authoritative for anything numeric or comparable - price, \
+mileage, recall count, safety stars, rank score, tile colors/points, when it was evaluated - never \
+recompute, re-derive, or restate any of these differently than what the JSON says, and never assume a \
+value from what a headline "sounds like" (e.g. a tile's color does not always match what its star count \
+or count might suggest - a 4-star and a 5-star safety rating can both be "green"; trust the JSON field, \
+not an assumption). When comparing two or more listings - price, mileage, recall count, or anything else - \
+pull the actual numbers from each listing's JSON and compare them directly; you are free to reason about \
+any combination of these fields the user asks about, not just the four signal tiles. Use the full report \
+text for qualitative detail and to cite specifics (a complaint number, a price comp range, a named recall, \
+a safety-test breakdown) when the question calls for depth beyond a number.
+
+How the "Recommended - best pick" ranking specifically works - use this, and only this, when asked why \
+one listing outranks another in rank: it is the "rank_score" field (tile points only, nothing else) as \
+the primary key, "safety_stars" as a tiebreaker if rank_score is equal, and "evaluated_at" (later wins) as \
+the final tiebreaker if both are equal. This ranking intentionally does NOT factor in price, mileage, or \
+recall count - so if asked "why is X ranked over Y" specifically, answer using only rank_score/safety_stars/ \
+evaluated_at and say so; but if asked to "compare" listings more broadly, freely discuss price, mileage, \
+recall count, and anything else in the JSON, since those are real, relevant facts even though they don't \
+drive the badge itself.
 
 You can also answer questions about what the CarScout app itself offers - this is real, current \
 information about the app, not something to guess at or deny knowledge of:
@@ -72,18 +150,6 @@ badge on the top one and a red "Lowest-ranked - consider carefully" badge on the
 two listings have been evaluated).
 - A new listing can be checked from the "Run a new check" tab.
 
-How ranking works - use this, and only this, when asked why one listing outranks another: each \
-listing's "Rank score" line below is already fully computed (green=2pt, amber=1pt, red=0pt per signal, \
-summed) - just relay those numbers and point-per-tile breakdowns, never recompute or re-derive them, \
-and never state a tile's color or point value from memory instead of what's written below (a tile's \
-color does not always match what its headline might suggest - e.g. a 4-star and a 5-star safety rating \
-can both be "green"; trust the written color and point value only). Nothing besides the four tile \
-points affects the ranking - not price, not mileage, not condition, not the symptom asked about - so \
-never cite those as the reason. If two listings' rank scores are equal, say plainly that they're tied \
-on every signal rather than inventing a difference; a tie is broken by whichever has the later \
-"Evaluated" timestamp below, not by any signal - compare the actual timestamps given, don't guess \
-which one came first or assume being listed first means anything.
-
 Evaluated listings:
 {listings_block}
 """
@@ -92,52 +158,50 @@ Evaluated listings:
 def _format_listing(entry, rank_label: str | None) -> str:
     tiles = entry.tiles()
     if tiles:
-        tile_lines = "\n".join(
-            f"  - {_TILE_TITLES.get(signal, signal)}: {tile.get('color', 'amber')} "
-            f"({_RANK_POINTS.get(tile.get('color'), 1)}pt) - {tile.get('headline', 'No data')}"
+        signals: dict[str, SignalFact] | str = {
+            signal: SignalFact(
+                color=tile.get("color", "amber"),
+                points=_RANK_POINTS.get(tile.get("color"), 1),
+                headline=tile.get("headline", "No data"),
+            )
             for signal, tile in tiles.items()
-        )
-        # Pre-computed, not left for the model to add up or infer - see the
-        # _RANK_POINTS comment above for why (a real, reproduced case of the
-        # model overriding a given color with what it assumed the color
-        # "should" be based on the headline's star count).
-        score = sum(_RANK_POINTS.get(t.get("color"), 1) for t in tiles.values())
-        max_score = len(tiles) * 2
-        score_line = f"Rank score: {score}/{max_score} (points already totaled below - do not recompute)\n"
+        }
+        rank_score = sum(s.points for s in signals.values())
+        rank_score_max = len(signals) * 2
+        safety_stars = _safety_stars(tiles)
+        recall_count = _recall_count(tiles)
     else:
-        tile_lines = "  - No at-a-glance summary saved for this older search."
-        score_line = ""
-    # Without this line, the model had no way to know which listing the
-    # comparison grid actually recommends - asking "why did you recommend
-    # X" got "I didn't recommend X" (technically true from what it could
-    # see, but flatly contradicting the gold badge on screen). rank_label
-    # is the exact same string the card badge renders - one source of
-    # truth, so the chat can never disagree with what the user is looking
-    # at (see rank_labels in streamlit_app.py).
-    rank_line = f"Ranking among your evaluated listings: {rank_label}\n" if rank_label else ""
-    # Full due-diligence findings, not just the one-line tile headline above -
+        signals = "No at-a-glance summary saved for this older search."
+        rank_score = rank_score_max = safety_stars = recall_count = None
+
+    facts = ListingFacts(
+        vehicle=f"{entry.year} {entry.make} {entry.model}",
+        asking_price_usd=entry.asking_price,
+        odometer_mi=entry.odometer,
+        condition=entry.condition or "not stated",
+        symptom_asked=entry.symptom,
+        evaluated_at=entry.created_at.isoformat() if entry.created_at else None,
+        # rank_label is the exact same string the card badge renders - one
+        # source of truth, so the chat can never disagree with what the user
+        # is looking at (see rank_labels in streamlit_app.py). Without this,
+        # asking "why did you recommend X" got "I didn't recommend X" -
+        # technically accurate from what the chat could see, but flatly
+        # contradicting the gold badge on screen.
+        rank_label=rank_label,
+        rank_score=rank_score,
+        rank_score_max=rank_score_max,
+        safety_stars=safety_stars,
+        recall_count=recall_count,
+        signals=signals,
+    )
+    # Full due-diligence findings, not just the tile headlines above -
     # without this, the chat could only ever speak in tile-color terms (its
     # only previous source of detail) and had no way to cite the specific
     # complaint numbers, price comps, recall descriptions, or safety-test
     # breakdown the agent actually found, even though that full report is
     # sitting right there in the same saved row.
-    report_line = f"\nFull due-diligence report:\n{entry.full_answer}" if entry.full_answer else ""
-    # Concrete data for the tiebreak rule stated in the system prompt ("most
-    # recently evaluated wins a tie"), for the same reason score_line exists -
-    # without an actual timestamp to compare, the model guessed at direction
-    # and got it backwards (said the tied winner was evaluated "first",
-    # exactly the opposite of the real rule).
-    evaluated_line = f"Evaluated: {entry.created_at:%b %d, %Y %I:%M %p} UTC\n" if entry.created_at else ""
-    return (
-        f"{entry.year} {entry.make} {entry.model} - asking ${entry.asking_price:,.0f}, "
-        f"{entry.odometer:,} mi, condition: {entry.condition or 'not stated'}\n"
-        f"{evaluated_line}"
-        f"{rank_line}"
-        f"{score_line}"
-        f"Symptom/question originally asked: {entry.symptom}\n"
-        f"{tile_lines}"
-        f"{report_line}"
-    )
+    report_block = f"\nFull due-diligence report:\n{entry.full_answer}" if entry.full_answer else ""
+    return facts.model_dump_json(indent=2, exclude_none=True) + report_block
 
 
 def _build_messages(entries: list, question: str, chat_history: list[dict], rank_labels: dict) -> list[dict]:

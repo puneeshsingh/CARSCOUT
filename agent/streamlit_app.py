@@ -273,6 +273,20 @@ def _rank_score(tiles: dict) -> int:
     return sum(_RANK_POINTS.get(t.get("color"), 0) for t in tiles.values())
 
 
+def _safety_stars(tiles: dict) -> int:
+    """0-5 stars parsed from the safety tile's headline, or 0 if unparseable
+    (no rating on file). A 4-star and a 5-star safety rating are both
+    deliberately "green" in classify_tiles() - a real, coarser-than-stars
+    tile bucket, not a bug - but that meant two listings differing only in
+    star count landed as a flat tie in _rank_score() alone, with nothing to
+    separate a 5-star pick from a 4-star one. Used as the ranking's second
+    sort key (after the tile-color score, before recency) so a materially
+    better safety rating still counts even when it doesn't cross a color
+    bucket boundary."""
+    match = _STAR_HEADLINE_RE.match(tiles.get("safety", {}).get("headline", ""))
+    return int(match.group(1)) if match else 0
+
+
 def _score_color(score: int) -> str:
     """Buckets a rank score into the same red/amber/green language as the
     tiles, by the same fraction the progress bar already renders as its
@@ -842,7 +856,7 @@ with tab_compare:
         # sort last, since there's nothing to rank them on.
         ranked = sorted(
             recent,
-            key=lambda e: _rank_score(e.tiles()) if e.tiles() else -1,
+            key=lambda e: (_rank_score(e.tiles()), _safety_stars(e.tiles())) if e.tiles() else (-1, -1),
             reverse=True,
         )
         rank_eligible = sum(1 for e in ranked if e.tiles())
