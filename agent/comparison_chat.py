@@ -27,7 +27,7 @@ logger = logging.getLogger("carscout_comparison_chat")
 
 _client = OpenAI()
 
-COMPARISON_CHAT_MODEL = "gpt-4o-mini"
+COMPARISON_CHAT_MODEL = "gpt-4o"
 SCOPE_CHECK_MODEL = "gpt-4o-mini"
 TAVILY_API_KEY_ENV = "TAVILY_API_KEY"
 MAX_WEB_RESULTS = 3

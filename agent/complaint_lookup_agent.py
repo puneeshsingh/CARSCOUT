@@ -52,11 +52,11 @@ logger = logging.getLogger("complaint_lookup")
 # two - while still failing closed on a runaway loop.
 MAX_STEPS = 20
 
-# gpt-4o-mini pricing as of this project's OpenAI account, in USD per 1M
+# gpt-4o pricing as of this project's OpenAI account, in USD per 1M
 # tokens. Hardcoded for a rough demo estimate only - check
 # https://openai.com/api/pricing for current rates if this drifts.
-INPUT_PRICE_PER_1M_TOKENS = 0.15
-OUTPUT_PRICE_PER_1M_TOKENS = 0.60
+INPUT_PRICE_PER_1M_TOKENS = 2.50
+OUTPUT_PRICE_PER_1M_TOKENS = 10.00
 
 # Below search_complaints's own DEFAULT_MIN_SCORE (0.70, not a confident
 # match) but above this, the closest candidate is worth showing to the user
@@ -234,7 +234,7 @@ Keep the whole thing concise: title, quick-verdict line, the four short
 sections, and the closing note - nothing else.
 """
 
-model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+model = ChatOpenAI(model="gpt-4o", temperature=0)
 
 
 def _format_no_confident_match_answer(
