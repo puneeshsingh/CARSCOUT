@@ -39,13 +39,27 @@ _TILE_TITLES = {
     "reliability": "Reliability", "price": "Price fairness",
     "recalls": "Recall history", "safety": "Safety rating",
 }
+# Mirrors streamlit_app.py's _RANK_POINTS exactly (same reason it's a local
+# copy, not an import) - this is the real scoring rule the comparison grid
+# ranks listings by. Used below to pre-compute each listing's point total in
+# _format_listing(), rather than asking the model to derive or recall it:
+# even with an explicit instruction to read colors "exactly as given," gpt-4o
+# repeatedly stated a listing's 4-star safety tile as amber when the actual
+# stored color was green (matching a 5-star tile) - a real, reproducible case
+# of the model's own prior expectations (4-star "should" be lesser than
+# 5-star) overriding data actually in the prompt. Handing it the finished
+# arithmetic removes the judgment call entirely - it only has numbers to
+# relay, nothing to infer.
+_RANK_POINTS = {"green": 2, "amber": 1, "red": 0}
 
 SYSTEM_PROMPT_TEMPLATE = """You are a helpful assistant answering questions about used-car listings the \
 user has already evaluated with CarScout, a due-diligence tool. Answer questions about a specific vehicle \
 ONLY using the listing summaries below - never state or imply anything about a vehicle's reliability, price \
 fairness, recalls, or safety rating beyond what's given here, and never draw on outside/training knowledge \
 about specific vehicles or models. If the user asks something about a vehicle that the data below doesn't \
-cover, say so plainly instead of guessing.
+cover, say so plainly instead of guessing. Each listing includes its full due-diligence report below the \
+signal tiles - prefer citing specifics from that report (a complaint number, a price comp range, a named \
+recall, a safety-test breakdown) over restating a tile's one-line headline when the question calls for depth.
 
 You can also answer questions about what the CarScout app itself offers - this is real, current \
 information about the app, not something to guess at or deny knowledge of:
@@ -58,14 +72,17 @@ badge on the top one and a red "Lowest-ranked - consider carefully" badge on the
 two listings have been evaluated).
 - A new listing can be checked from the "Run a new check" tab.
 
-How ranking is actually computed - use this, and only this, when asked why one listing outranks \
-another: each listing's rank is a simple point total across its four signal tiles - green tiles score \
-2, amber tiles score 1, red tiles score 0 - summed and compared. Nothing else affects the ranking: not \
-price, not mileage, not condition, not the symptom that was asked about. If asked "why" one listing \
-beats another, work it out by comparing their tile colors signal-by-signal in the data below and name \
-the specific tile(s) that differ - never cite mileage, price, or condition as the reason unless a tile's \
-color itself reflects it, and never say the reason "isn't detailed" - the tile colors below are exactly \
-that detail.
+How ranking works - use this, and only this, when asked why one listing outranks another: each \
+listing's "Rank score" line below is already fully computed (green=2pt, amber=1pt, red=0pt per signal, \
+summed) - just relay those numbers and point-per-tile breakdowns, never recompute or re-derive them, \
+and never state a tile's color or point value from memory instead of what's written below (a tile's \
+color does not always match what its headline might suggest - e.g. a 4-star and a 5-star safety rating \
+can both be "green"; trust the written color and point value only). Nothing besides the four tile \
+points affects the ranking - not price, not mileage, not condition, not the symptom asked about - so \
+never cite those as the reason. If two listings' rank scores are equal, say plainly that they're tied \
+on every signal rather than inventing a difference; a tie is broken by whichever has the later \
+"Evaluated" timestamp below, not by any signal - compare the actual timestamps given, don't guess \
+which one came first or assume being listed first means anything.
 
 Evaluated listings:
 {listings_block}
@@ -76,11 +93,20 @@ def _format_listing(entry, rank_label: str | None) -> str:
     tiles = entry.tiles()
     if tiles:
         tile_lines = "\n".join(
-            f"  - {_TILE_TITLES.get(signal, signal)}: {tile.get('color', 'amber')} ({tile.get('headline', 'No data')})"
+            f"  - {_TILE_TITLES.get(signal, signal)}: {tile.get('color', 'amber')} "
+            f"({_RANK_POINTS.get(tile.get('color'), 1)}pt) - {tile.get('headline', 'No data')}"
             for signal, tile in tiles.items()
         )
+        # Pre-computed, not left for the model to add up or infer - see the
+        # _RANK_POINTS comment above for why (a real, reproduced case of the
+        # model overriding a given color with what it assumed the color
+        # "should" be based on the headline's star count).
+        score = sum(_RANK_POINTS.get(t.get("color"), 1) for t in tiles.values())
+        max_score = len(tiles) * 2
+        score_line = f"Rank score: {score}/{max_score} (points already totaled below - do not recompute)\n"
     else:
         tile_lines = "  - No at-a-glance summary saved for this older search."
+        score_line = ""
     # Without this line, the model had no way to know which listing the
     # comparison grid actually recommends - asking "why did you recommend
     # X" got "I didn't recommend X" (technically true from what it could
@@ -89,12 +115,28 @@ def _format_listing(entry, rank_label: str | None) -> str:
     # truth, so the chat can never disagree with what the user is looking
     # at (see rank_labels in streamlit_app.py).
     rank_line = f"Ranking among your evaluated listings: {rank_label}\n" if rank_label else ""
+    # Full due-diligence findings, not just the one-line tile headline above -
+    # without this, the chat could only ever speak in tile-color terms (its
+    # only previous source of detail) and had no way to cite the specific
+    # complaint numbers, price comps, recall descriptions, or safety-test
+    # breakdown the agent actually found, even though that full report is
+    # sitting right there in the same saved row.
+    report_line = f"\nFull due-diligence report:\n{entry.full_answer}" if entry.full_answer else ""
+    # Concrete data for the tiebreak rule stated in the system prompt ("most
+    # recently evaluated wins a tie"), for the same reason score_line exists -
+    # without an actual timestamp to compare, the model guessed at direction
+    # and got it backwards (said the tied winner was evaluated "first",
+    # exactly the opposite of the real rule).
+    evaluated_line = f"Evaluated: {entry.created_at:%b %d, %Y %I:%M %p} UTC\n" if entry.created_at else ""
     return (
         f"{entry.year} {entry.make} {entry.model} - asking ${entry.asking_price:,.0f}, "
         f"{entry.odometer:,} mi, condition: {entry.condition or 'not stated'}\n"
+        f"{evaluated_line}"
         f"{rank_line}"
+        f"{score_line}"
         f"Symptom/question originally asked: {entry.symptom}\n"
         f"{tile_lines}"
+        f"{report_line}"
     )
 
 
