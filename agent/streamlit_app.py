@@ -57,6 +57,11 @@ _RANK_POINTS = {"green": 2, "amber": 1, "red": 0}
 MAX_RANK_SCORE = len(TILE_TITLES) * max(_RANK_POINTS.values())
 
 _STAR_HEADLINE_RE = re.compile(r"^(\d)-star overall rating$")
+# Recall tile headline is always "{count} recall(s) on record - verify by
+# VIN" (see classify_tiles in complaint_lookup_agent.py) - mirrors
+# comparison_chat.py's identical local copy (same reasoning: a small,
+# single-purpose regex, not worth importing across files).
+_RECALL_COUNT_RE = re.compile(r"^(\d+) recall")
 
 
 def _starred_headline(headline: str) -> str:
@@ -284,6 +289,22 @@ def _safety_stars(tiles: dict) -> int:
     better safety rating still counts even when it doesn't cross a color
     bucket boundary."""
     match = _STAR_HEADLINE_RE.match(tiles.get("safety", {}).get("headline", ""))
+    return int(match.group(1)) if match else 0
+
+
+def _recall_count(tiles: dict) -> int:
+    """Recall count parsed from the recall tile's headline, or 0 if
+    unparseable. The recall tile's color is deliberately coarse - any
+    recall count at all is "amber" in classify_tiles(), a recall is history
+    to verify, not a confirmed live defect, and that stays unchanged - but
+    it meant two listings with the same rank_score and safety_stars, one
+    with 2 recalls and the other with 5, still landed as a flat tie with
+    nothing to separate them beyond an arbitrary "most recently evaluated"
+    fallback. Used as the ranking's third sort key (after tile-color score
+    and safety stars, before recency) so a real, meaningfully different
+    recall count still counts even when it doesn't cross the tile's own
+    color bucket boundary."""
+    match = _RECALL_COUNT_RE.match(tiles.get("recalls", {}).get("headline", ""))
     return int(match.group(1)) if match else 0
 
 
@@ -854,9 +875,33 @@ with tab_compare:
         # ranks the listings - a green-heavy report leads, red-heavy trails.
         # Entries saved before tile classification existed (score -1) always
         # sort last, since there's nothing to rank them on.
+        #
+        # Priority chain (highest first): rank_score (the same 4 tile-color
+        # points shown as "X/8 signals positive" on each card - kept
+        # primary so the badge order never disagrees with that visible
+        # number), then safety_stars (safety matters most for a purchase
+        # this size), then recall_count with fewer winning (a real
+        # defect-history signal - the tile itself is deliberately coarse,
+        # "any recall" is amber regardless of count, but two listings tied
+        # on every tile color shouldn't stay tied when one has 5 recalls on
+        # record and the other has 2), then asking_price with lower
+        # winning, then odometer with lower winning. Python's sorted() is
+        # stable and `recent` already arrives sorted most-recent-first, so
+        # if every one of those is still exactly equal, the more-recently-
+        # evaluated listing keeps its earlier position - a mechanical
+        # fallback to keep the order deterministic, never a claim that
+        # "evaluated later" makes one listing better (see
+        # comparison_chat.py's system prompt for the matching explanation -
+        # the chat must describe a true tie as a tie, not invent a reason).
         ranked = sorted(
             recent,
-            key=lambda e: (_rank_score(e.tiles()), _safety_stars(e.tiles())) if e.tiles() else (-1, -1),
+            key=lambda e: (
+                _rank_score(e.tiles()) if e.tiles() else -1,
+                _safety_stars(e.tiles()) if e.tiles() else -1,
+                -_recall_count(e.tiles()) if e.tiles() else 0,
+                -e.asking_price,
+                -e.odometer,
+            ),
             reverse=True,
         )
         rank_eligible = sum(1 for e in ranked if e.tiles())
