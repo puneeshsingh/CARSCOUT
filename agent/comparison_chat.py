@@ -80,6 +80,24 @@ def _recall_count(tiles: dict) -> int:
     return int(match.group(1)) if match else 0
 
 
+def _overall_color(tiles: dict) -> str:
+    """Mirrors streamlit_app.py's _overall_color() exactly (same local-copy
+    reasoning as the helpers above) - worst-signal-wins severity, the same
+    rule that drives each card's "Looks solid"/"Worth a closer look"/"Needs
+    caution" badge. Computed here too so a single-listing verdict question
+    ("is the Kona a good deal?") gets the app's own already-computed
+    answer instead of the model re-deriving its own opinion from the four
+    tile colors, which could disagree with the badge actually shown on
+    screen - the same class of bug as rank_label existing for cross-listing
+    recommendation questions."""
+    colors = {t.get("color", "amber") for t in tiles.values()}
+    if "red" in colors:
+        return "red"
+    if "amber" in colors:
+        return "amber"
+    return "green"
+
+
 class SignalFact(BaseModel):
     color: Literal["red", "amber", "green"]
     points: int
@@ -108,6 +126,7 @@ class ListingFacts(BaseModel):
     rank_score_max: int | None = None
     safety_stars: int | None = None
     recall_count: int | None = None
+    overall_verdict: Literal["red", "amber", "green"] | None = None
     signals: dict[str, SignalFact] | str | None = None
 
 
@@ -163,6 +182,27 @@ what's already inside rank_score - so if asked to "compare" listings more broadl
 outranks another), freely discuss price, mileage, recall count, and anything else in the JSON, since those \
 are all real, relevant facts even when they aren't what decided the rank.
 
+When asked a broad recommendation question - "which car is the best overall value", "which should I buy", \
+"which is the best one" - your answer must lead with whichever listing's "rank_label" is "Recommended - \
+best pick". That pick is already the result of weighing every signal CarScout tracks (reliability, price \
+fairness vs. market, recall history, safety, then price, then mileage as tiebreakers - the same chain \
+described above), so recommending a *different* listing as "the best value" by informally re-weighing \
+price/mileage/recalls yourself would silently contradict the gold "Recommended - best pick" badge already \
+shown on that listing's card, which is confusing and undermines trust in the app - never do this. Use \
+specific numbers (price, mileage, recall count, safety stars) as supporting detail for why the recommended \
+pick is a good choice, not as grounds to override it. If the user's own stated priorities genuinely point \
+elsewhere (e.g. they say mileage matters most to them specifically), you may name an alternative, but only \
+as an explicit secondary note that clearly flags it differs from CarScout's own top pick and explains why - \
+never present an alternative as simply "the best" without that framing.
+
+The same rule applies to a single-listing verdict question - "is the Kona a good deal?", "should I buy the \
+Elantra?", "how does this one look overall?". Use that listing's "overall_verdict" field ("red"/"amber"/ \
+"green", worst-tile-color-wins) as the answer's bottom line - it's the exact same computation behind that \
+card's own badge ("Looks solid"/"Worth a closer look"/"Needs caution"). Explain your answer using the \
+individual signals (which one is driving the verdict, and why), but never construct a different overall \
+impression than what "overall_verdict" says, even if you personally would have weighed the four signals \
+differently - that would contradict the badge the user is already looking at on screen.
+
 You can also answer questions about what the CarScout app itself offers - this is real, current \
 information about the app, not something to guess at or deny knowledge of:
 - Each evaluated listing's card has a "Download PDF" button for a saved copy of that listing's report.
@@ -194,9 +234,11 @@ def _format_listing(entry, rank_label: str | None) -> str:
         rank_score_max = len(signals) * 2
         safety_stars = _safety_stars(tiles)
         recall_count = _recall_count(tiles)
+        overall_verdict = _overall_color(tiles)
     else:
         signals = "No at-a-glance summary saved for this older search."
         rank_score = rank_score_max = safety_stars = recall_count = None
+        overall_verdict = None
 
     facts = ListingFacts(
         vehicle=f"{entry.year} {entry.make} {entry.model}",
@@ -216,6 +258,7 @@ def _format_listing(entry, rank_label: str | None) -> str:
         rank_score_max=rank_score_max,
         safety_stars=safety_stars,
         recall_count=recall_count,
+        overall_verdict=overall_verdict,
         signals=signals,
     )
     # Full due-diligence findings, not just the tile headlines above -
@@ -297,8 +340,14 @@ listing is cheapest, best, or recommended; why one saved listing is ranked/recom
 above - always false, no matter the phrasing); comparing two or more saved listings against each other; \
 asking WHICH saved listing has the best or worst reliability, price fairness, recall history, or safety \
 rating (a cross-listing question like "which one has the best safety rating" is still just reading values \
-already in the listings, not general knowledge); or asking about any of those four signals for one specific \
-saved listing.
+already in the listings, not general knowledge); asking about any of those four signals for one specific \
+saved listing; OR asking for an overall verdict on one specific saved listing - "is the Kona a good deal?", \
+"should I buy the Elantra?", "how does this one look overall?", "is this car worth it?" - CarScout has \
+already computed its own overall verdict for every saved listing (the badge on that listing's card), so this \
+is reading an existing app answer, not researching the vehicle in general. Only route to web search if the \
+question is clearly about the MODEL/BRAND in general rather than the user's own specific saved listing (e.g. \
+"is the Kona generally a reliable model?" with no reference to their own saved one, or asking about a whole \
+different vehicle not in their list at all).
 
 Also answer false for anything NOT about cars, vehicles, or car buying at all - general trivia, unrelated \
 topics, or anything else outside this chat's purpose. Never route an off-topic question to a web search just \
