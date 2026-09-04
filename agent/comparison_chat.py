@@ -58,6 +58,15 @@ badge on the top one and a red "Lowest-ranked - consider carefully" badge on the
 two listings have been evaluated).
 - A new listing can be checked from the "Run a new check" tab.
 
+How ranking is actually computed - use this, and only this, when asked why one listing outranks \
+another: each listing's rank is a simple point total across its four signal tiles - green tiles score \
+2, amber tiles score 1, red tiles score 0 - summed and compared. Nothing else affects the ranking: not \
+price, not mileage, not condition, not the symptom that was asked about. If asked "why" one listing \
+beats another, work it out by comparing their tile colors signal-by-signal in the data below and name \
+the specific tile(s) that differ - never cite mileage, price, or condition as the reason unless a tile's \
+color itself reflects it, and never say the reason "isn't detailed" - the tile colors below are exactly \
+that detail.
+
 Evaluated listings:
 {listings_block}
 """
