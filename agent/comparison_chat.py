@@ -130,6 +130,12 @@ any combination of these fields the user asks about, not just the four signal ti
 text for qualitative detail and to cite specifics (a complaint number, a price comp range, a named recall, \
 a safety-test breakdown) when the question calls for depth beyond a number.
 
+When asked for an extreme across ALL listings - the most/fewest of something, the highest/lowest, the \
+best/worst on a single field - first write out that field's value for every single listing, then find the \
+actual max or min among those values, then list every listing whose value equals that max or min, not just \
+the first one or two you notice. Ties are common in this data (several listings often share the same recall \
+count or star rating) and must all be named - never silently drop a tied listing from the answer.
+
 How the "Recommended - best pick" ranking specifically works - use this, and only this, when asked why \
 one listing outranks another in rank: it is the "rank_score" field (tile points only, nothing else) as \
 the primary key, "safety_stars" as a tiebreaker if rank_score is equal, and "evaluated_at" (later wins) as \
@@ -254,19 +260,27 @@ def stream_comparison_answer(entries: list, question: str, chat_history: list[di
 # of "did it actually check" and "did it just decide to sound confident").
 
 SCOPE_CHECK_SYSTEM_PROMPT = """You are a narrow routing classifier for a used-car comparison chat. You are \
-given a user's question and the make/model of every vehicle listing they've evaluated. A web search should \
-fire ONLY for a question that is BOTH (a) genuinely about used cars, vehicles, car ownership, or car buying, \
-AND (b) not answerable from the saved listings alone - e.g. a brand or model's reputation in general, how a \
-listed vehicle compares to models NOT in the list, typical ownership/maintenance/inspection costs, or other \
-car-related facts beyond the specific saved listings' own price, mileage, condition, reliability, recalls, \
-or safety rating.
+given a user's question and the make/model of every vehicle listing they've evaluated. Important context: \
+CarScout itself ranks/orders these saved listings from best to worst pick, using its own internal scoring - \
+so any question about why one saved listing is "ranked," "recommended," or "above/higher than" another is \
+ALWAYS about that internal app ranking, never about which car model is objectively better in general. The \
+web has no way to know CarScout's own ranking of the user's specific saved listings, so this kind of \
+question must never trigger a web search, regardless of the exact wording used ("ranked above", "ranked \
+higher than", "why was X recommended over Y", "why does X outrank Y", etc. all mean the same thing here).
+
+A web search should fire ONLY for a question that is BOTH (a) genuinely about used cars, vehicles, car \
+ownership, or car buying, AND (b) not answerable from the saved listings alone - e.g. a brand or model's \
+reputation in general, how a listed vehicle compares to models NOT in the list, typical ownership/ \
+maintenance/inspection costs, or other car-related facts beyond the specific saved listings' own price, \
+mileage, condition, reliability, recalls, or safety rating.
 
 Answer false (no web search) for anything answerable from the listings themselves, including: which saved \
-listing is cheapest, best, or recommended; comparing two or more saved listings against each other; asking \
-WHICH saved listing has the best or worst reliability, price fairness, recall history, or safety rating (a \
-cross-listing question like "which one has the best safety rating" is still just reading values already in \
-the listings, not general knowledge); or asking about any of those four signals for one specific saved \
-listing.
+listing is cheapest, best, or recommended; why one saved listing is ranked/recommended above another (see \
+above - always false, no matter the phrasing); comparing two or more saved listings against each other; \
+asking WHICH saved listing has the best or worst reliability, price fairness, recall history, or safety \
+rating (a cross-listing question like "which one has the best safety rating" is still just reading values \
+already in the listings, not general knowledge); or asking about any of those four signals for one specific \
+saved listing.
 
 Also answer false for anything NOT about cars, vehicles, or car buying at all - general trivia, unrelated \
 topics, or anything else outside this chat's purpose. Never route an off-topic question to a web search just \
